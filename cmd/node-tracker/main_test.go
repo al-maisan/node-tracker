@@ -21,33 +21,45 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/al-maisan/node-tracker/internal/config"
 	"github.com/al-maisan/node-tracker/internal/state"
 )
 
-// world fakes bitcoind, an Esplora API and the Telegram Bot API.
+// No test looks for the developer's own bitcoind.
+func init() {
+	detectEnv = config.Env{Root: "/nonexistent-node-tracker-test", Getenv: func(string) string { return "" }}
+}
+
+// world fakes bitcoind (at / and /rpc), an Esplora API (at …/api) and the
+// Telegram Bot API.
 type world struct {
 	node, tip atomic.Int64
 	tgDown    atomic.Bool
 	rpcFail   atomic.Value // string: "" answers, else "401", "403" or "-28"
 	mu        sync.Mutex
+	chain     string   // the node's
 	sent      []string // telegram message texts
 	srv       *httptest.Server
 }
 
 func newWorld(t *testing.T) *world {
-	w := &world{}
+	w := &world{chain: "main"}
 	w.rpcFail.Store("")
 	w.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rpc := r.URL.Path == "/rpc" || r.URL.Path == "/"
 		switch {
-		case r.URL.Path == "/rpc" && w.rpcFail.Load() == "-28":
+		case rpc && w.rpcFail.Load() == "-28":
 			http.Error(rw, `{"result":null,"error":{"code":-28,"message":"Loading block index…"}}`, http.StatusInternalServerError)
-		case r.URL.Path == "/rpc" && w.rpcFail.Load() == "401":
+		case rpc && w.rpcFail.Load() == "401":
 			rw.WriteHeader(http.StatusUnauthorized)
-		case r.URL.Path == "/rpc" && w.rpcFail.Load() == "403":
+		case rpc && w.rpcFail.Load() == "403":
 			rw.WriteHeader(http.StatusForbidden)
-		case r.URL.Path == "/rpc":
-			fmt.Fprintf(rw, `{"result":{"blocks":%d,"headers":%d},"error":null}`, w.node.Load(), w.node.Load())
-		case r.URL.Path == "/api/blocks/tip/height":
+		case rpc:
+			w.mu.Lock()
+			chain := w.chain
+			w.mu.Unlock()
+			fmt.Fprintf(rw, `{"result":{"chain":%q,"blocks":%d,"headers":%d},"error":null}`, chain, w.node.Load(), w.node.Load())
+		case strings.HasSuffix(r.URL.Path, "/api/blocks/tip/height"):
 			fmt.Fprint(rw, w.tip.Load())
 		case r.URL.Path == "/botTOKEN/getMe":
 			fmt.Fprint(rw, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"nt_test_bot"}}`)
@@ -500,5 +512,66 @@ func TestNoConfigAndMissingCookie(t *testing.T) {
 	code, out, errs := exec(t, "check", "-config", cfg)
 	if code != exitNotInSync || !strings.Contains(out, "NODE_DOWN") || !strings.Contains(errs, "level=WARN msg=config warning=\"targets[0].node.cookie_file: "+cookie+" does not exist; bitcoind is not started yet") {
 		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	}
+}
+
+// A target without node, alert and notify watches the detected local
+// bitcoind with the balanced preset and every notifier; check logs what was
+// detected and warns about references of another chain.
+func TestDetectedNode(t *testing.T) {
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	home := t.TempDir()
+	conf, cookie := filepath.Join(home, ".bitcoin", "bitcoin.conf"), filepath.Join(home, ".bitcoin", ".cookie")
+	os.MkdirAll(filepath.Dir(conf), 0o700)
+	os.WriteFile(conf, []byte("server=1\nrpcport="+w.srv.URL[strings.LastIndex(w.srv.URL, ":")+1:]+"\n"), 0o600)
+	os.WriteFile(cookie, []byte("__cookie__:x"), 0o600)
+	saved := detectEnv
+	t.Cleanup(func() { detectEnv = saved })
+	detectEnv = config.Env{Root: t.TempDir(), Home: home, Getenv: func(string) string { return "" }}
+	t.Setenv("NT_TEST_TOKEN", "TOKEN")
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(cfg, []byte(fmt.Sprintf(`
+targets:
+  - name: btc
+    references: [{kind: esplora, url: %[1]s/signet/api}]
+notifiers:
+  - {name: tg, kind: telegram, api_url: %[1]s, bot_token_env: NT_TEST_TOKEN, chat_id: "42"}
+`, w.srv.URL)), 0o600)
+
+	detected := `level=INFO msg="detected local bitcoind" conf=` + conf + ` chain=main url=http://` + w.srv.Listener.Addr().String() + ` cookie_file=` + cookie + "\n"
+	mismatch := `msg="reference is on another chain than the node, so it is ignored; set references for the node's chain (see docs/configuration.md)" target=btc node_chain=main reference=esplora:` + w.srv.Listener.Addr().String() + ` reference_chain=signet` + "\n"
+	code, out, errs := exec(t, "check", "-config", cfg)
+	if code != exitNotInSync || !strings.Contains(out, "btc     NO_REFERENCE  938266") || !strings.Contains(out, "is on chain signet, the node on main") ||
+		!strings.Contains(out, "references 0/1") || !strings.Contains(errs, detected) || !strings.Contains(errs, mismatch) {
+		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	}
+	w.mu.Lock()
+	w.chain = "signet"
+	w.mu.Unlock()
+	if code, _, errs := exec(t, "check", "-config", cfg); code != exitOK || strings.Contains(errs, "another chain") {
+		t.Fatalf("check on signet: code=%d\n%s", code, errs)
+	}
+	// Debug, not info, for what runs from cron.
+	if code, _, errs := exec(t, "test-notify", "-config", cfg); code != exitOK || len(w.messages()) != 1 || strings.Contains(errs, "detected local bitcoind") {
+		t.Fatalf("test-notify: code=%d sent=%d\n%s", code, len(w.messages()), errs)
+	}
+	st := filepath.Join(t.TempDir(), "state.json")
+	if code, _, errs := exec(t, "once", "-config", cfg, "-state", st); code != exitOK || strings.Contains(errs, "detected local bitcoind") {
+		t.Fatalf("once: code=%d\n%s", code, errs)
+	}
+	if code, _, errs := exec(t, "once", "-config", cfg, "-state", st, "-log-level", "debug"); code != exitOK || !strings.Contains(errs, `level=DEBUG msg="detected local bitcoind"`) {
+		t.Fatalf("once -log-level debug: code=%d\n%s", code, errs)
+	} // Without references, the public ones are used, and said so.
+	os.WriteFile(cfg, []byte(fmt.Sprintf(`
+targets:
+  - name: btc
+notifiers:
+  - {name: tg, kind: telegram, api_url: %s, bot_token_env: NT_TEST_TOKEN, chat_id: "42"}
+`, w.srv.URL)), 0o600)
+	public := `level=DEBUG msg="using public references; set references to choose others, or [] for none" target=btc references=https://mempool.space/api,https://blockstream.info/api` + "\n"
+	if code, _, errs := exec(t, "test-notify", "-config", cfg, "-log-level", "debug"); code != exitOK || !strings.Contains(errs, public) {
+		t.Fatalf("test-notify, default references: code=%d\n%s", code, errs)
 	}
 }

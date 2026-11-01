@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -65,6 +66,9 @@ func main() {
 	os.Exit(code)
 }
 
+// detectEnv is where the local bitcoind is looked for; tests fake it.
+var detectEnv = config.SystemEnv()
+
 type options struct {
 	config, state, logFormat, logLevel string
 }
@@ -125,7 +129,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return exitUsage
 	}
-	cfg, m, code := setup(o, log, stderr)
+	// once, report and test-notify run from cron and timers: keep it quiet.
+	detectLevel := slog.LevelDebug
+	if cmd == "run" || cmd == "check" {
+		detectLevel = slog.LevelInfo
+	}
+	cfg, m, code := setup(o, log, detectLevel, stderr)
 	if m == nil {
 		return code
 	}
@@ -183,7 +192,7 @@ func installService(ctx context.Context, args []string, stdout, stderr io.Writer
 
 // setup loads the config and builds the monitor. Config errors go to stderr
 // as plain multi-line text, which reads better than a log line.
-func setup(o options, log *slog.Logger, stderr io.Writer) (*config.Config, *monitor.Monitor, int) {
+func setup(o options, log *slog.Logger, detectLevel slog.Level, stderr io.Writer) (*config.Config, *monitor.Monitor, int) {
 	path := o.config
 	if path == "" {
 		var err error
@@ -192,13 +201,25 @@ func setup(o options, log *slog.Logger, stderr io.Writer) (*config.Config, *moni
 			return nil, nil, exitUsage
 		}
 	}
-	cfg, warns, err := config.Load(path)
+	cfg, warns, err := config.LoadEnv(path, detectEnv)
 	for _, w := range warns {
 		log.Warn("config", "warning", w)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "node-tracker: %v\n", err)
 		return nil, nil, exitUsage
+	}
+	if d := cfg.Detected; d != nil {
+		log.Log(context.Background(), detectLevel, "detected local bitcoind", "conf", cmp.Or(d.Conf, "none"), "chain", d.Chain, "url", d.URL, "cookie_file", d.CookieFile)
+	}
+	for _, t := range cfg.Targets {
+		if t.DefaultRefs && len(t.References) > 0 {
+			var urls []string
+			for _, r := range t.References {
+				urls = append(urls, r.URL)
+			}
+			log.Log(context.Background(), detectLevel, "using public references; set references to choose others, or [] for none", "target", t.Name, "references", strings.Join(urls, ","))
+		}
 	}
 	m, err := app.Build(cfg, log)
 	if err != nil {

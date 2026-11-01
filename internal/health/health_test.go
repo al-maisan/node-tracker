@@ -92,6 +92,16 @@ func TestObserve(t *testing.T) {
 			want: Observation{NodeSource: "node", State: NoReference, Lag: 2, Node: 100, Tip: 102, TipFrom: "node", Err: "boom"},
 		},
 		{
+			name: "reference on another chain counts as failed",
+			s:    Sample{Node: Reading{Source: "node", Blocks: 100, Headers: 100, Chain: "main"}, Refs: []Reading{{Source: "a", Blocks: 150, Headers: 150, Chain: "signet"}}},
+			want: Observation{NodeSource: "node", State: NoReference, Node: 100, Tip: 100, TipFrom: "node", Err: "a is on chain signet, the node on main"},
+		},
+		{
+			name: "an unknown chain is no mismatch",
+			s:    Sample{Node: Reading{Source: "node", Blocks: 100, Headers: 100}, Refs: []Reading{{Source: "a", Blocks: 150, Headers: 150, Chain: "signet"}}},
+			want: Observation{NodeSource: "node", State: Lagging, Lag: 50, Node: 100, Tip: 150, TipFrom: "a"},
+		},
+		{
 			name: "node down wins",
 			s:    Sample{Node: Reading{Source: "node", Err: boom}, Refs: []Reading{ref("a", 100)}},
 			want: Observation{State: NodeDown, NodeSource: "node", Err: "boom"},

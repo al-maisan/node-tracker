@@ -36,14 +36,14 @@ func TestHeight(t *testing.T) {
 				w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
-			h, err := New("e", srv.URL+"/api/", httpx.NewClient()).Height(context.Background())
+			h, err := New("e", srv.URL+"/api/", "signet", httpx.NewClient()).Height(context.Background())
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tt.wantErr)
 				}
 				return
 			}
-			if err != nil || h.Blocks != tt.want || h.Headers != tt.want {
+			if err != nil || h.Blocks != tt.want || h.Headers != tt.want || h.Chain != "signet" {
 				t.Fatalf("got %+v, %v", h, err)
 			}
 		})

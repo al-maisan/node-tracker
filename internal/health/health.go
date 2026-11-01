@@ -5,6 +5,7 @@ package health
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -39,7 +40,14 @@ type Reading struct {
 	Source  string
 	Blocks  uint64
 	Headers uint64
+	Chain   string
 	Err     error
+}
+
+// MismatchedChain tells whether ref is known to be on another chain than
+// node. Its heights mean nothing for node, so it counts as failed.
+func MismatchedChain(node, ref Reading) bool {
+	return node.Chain != "" && ref.Chain != "" && node.Chain != ref.Chain
 }
 
 // Tip is the highest height the reading knows of.
@@ -68,7 +76,8 @@ type Observation struct {
 // target recovers only once lag <= r.Recover, even across a NODE_DOWN).
 //
 // Precedence: NODE_DOWN, then LAGGING (also when the lag is only known from
-// the node's own headers), then NO_REFERENCE, then OK.
+// the node's own headers), then NO_REFERENCE, then OK. A reference on
+// another chain than the node counts as failed.
 func Observe(s Sample, r Rule, lagging bool) Observation {
 	if s.Node.Err != nil {
 		return Observation{State: NodeDown, NodeSource: s.Node.Source, Err: clip(s.Node.Err.Error())}
@@ -79,6 +88,8 @@ func Observe(s Sample, r Rule, lagging bool) Observation {
 	for _, ref := range s.Refs {
 		if ref.Err != nil {
 			errs = append(errs, ref.Err)
+		} else if MismatchedChain(s.Node, ref) {
+			errs = append(errs, fmt.Errorf("%s is on chain %s, the node on %s", ref.Source, ref.Chain, s.Node.Chain))
 		} else {
 			ok = append(ok, ref)
 		}

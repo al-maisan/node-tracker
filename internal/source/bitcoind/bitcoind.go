@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/al-maisan/node-tracker/internal/httpx"
@@ -17,6 +18,8 @@ import (
 )
 
 const maxBody = 64 << 10 // getblockchaininfo is ~1-2 KiB
+
+var chainRE = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 
 // Auth supplies RPC credentials. Exactly one way must be set.
 type Auth struct {
@@ -44,6 +47,7 @@ type rpcResponse struct {
 	Result *struct {
 		Blocks  *int64 `json:"blocks"`
 		Headers *int64 `json:"headers"`
+		Chain   string `json:"chain"`
 	} `json:"result"`
 	Error *struct {
 		Code    int    `json:"code"`
@@ -112,7 +116,11 @@ func (c *Client) Height(ctx context.Context) (source.Height, error) {
 	if err != nil {
 		return source.Height{}, err
 	}
-	return source.Height{Blocks: blocks, Headers: headers}, nil
+	chain := r.Result.Chain
+	if !chainRE.MatchString(chain) { // from the node, so possibly junk
+		chain = ""
+	}
+	return source.Height{Blocks: blocks, Headers: headers, Chain: chain}, nil
 }
 
 func (c *Client) credentials() (user, pass string, err error) {

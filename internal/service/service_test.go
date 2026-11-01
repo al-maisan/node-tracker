@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/al-maisan/node-tracker/deploy"
+	"github.com/al-maisan/node-tracker/internal/config"
 )
 
 // fakeCmd records the commands instead of running them.
@@ -482,6 +483,37 @@ func TestInstallSystem(t *testing.T) {
 	}
 	if !slices.Equal(e.cmd.calls, want[1:]) {
 		t.Errorf("calls = %q", e.cmd.calls)
+	}
+}
+
+// -system detects the node as the service account will: the system cookie,
+// not the one in the installing user's home or $BITCOIN_DATADIR.
+func TestInstallSystemDetectsAsService(t *testing.T) {
+	e := newEnv(t)
+	rootExe(t, e)
+	home, root := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BITCOIN_DATADIR", filepath.Join(home, "btc"))
+	for _, d := range []string{".bitcoin", "btc"} {
+		mkdir(t, filepath.Join(home, d), 0o750)
+		write(t, filepath.Join(home, d, ".cookie"), "__cookie__:x", 0o640)
+	}
+	e.h.ServiceEnv = config.ServiceEnv()
+	e.h.ServiceEnv.Root = root
+	src := filepath.Join(e.conf, "node-tracker", "config.yaml")
+	write(t, src, strings.Replace(testConfig(filepath.Join(e.h.EtcDir, "token"), e.cookie),
+		`    node: {kind: bitcoind, url: "http://127.0.0.1:8332", cookie_file: `+e.cookie+"}\n", "", 1), 0o600)
+	sys := filepath.Join(root, "var", "lib", "bitcoind", ".cookie")
+	install := func() error {
+		return Install(context.Background(), e.h, Options{System: true, DryRun: true, Config: src})
+	}
+	if err := install(); err == nil || !strings.Contains(err.Error(), "cookie_file "+sys+" does not exist") {
+		t.Fatalf("err = %v, want the system cookie", err)
+	}
+	mkdir(t, filepath.Dir(sys), 0o750)
+	write(t, sys, "__cookie__:x", 0o640)
+	if err := install(); err != nil {
+		t.Fatal(err)
 	}
 }
 

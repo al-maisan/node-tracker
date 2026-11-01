@@ -42,14 +42,16 @@ var (
 )
 
 const (
-	defaultInterval = 30 * time.Second
-	defaultTimeout  = 10 * time.Second
-	onionTimeout    = 30 * time.Second // minimum per-call timeout for .onion hosts
-	defaultFor      = 2
-	defaultOutlier  = 6
-	maxFor          = 100
-	maxConfigSize   = 1 << 20
-	maxSecretSize   = 4 << 10
+	defaultInterval  = 30 * time.Second
+	defaultTimeout   = 10 * time.Second
+	onionTimeout     = 30 * time.Second // minimum per-call timeout for .onion hosts
+	defaultThreshold = 3
+	defaultRecover   = 1
+	defaultFor       = 2
+	defaultOutlier   = 6
+	maxFor           = 100
+	maxConfigSize    = 1 << 20
+	maxSecretSize    = 4 << 10
 )
 
 var (
@@ -77,6 +79,8 @@ type Config struct {
 	StateFile string        `yaml:"state_file"`
 	Targets   []Target      `yaml:"targets"`
 	Notifiers []Notifier    `yaml:"notifiers"`
+
+	Detected *Detected `yaml:"-"` // the local bitcoind, if a target's node was left out
 }
 
 // Target is one watched node.
@@ -87,6 +91,8 @@ type Target struct {
 	ReferenceOutlier *uint64    `yaml:"reference_outlier"` // default 6; 0 disables
 	Alert            Alert      `yaml:"alert"`
 	Notify           []string   `yaml:"notify"`
+
+	DefaultRefs bool `yaml:"-"` // derived: references left out, so the public ones of the chain
 }
 
 // Endpoint is a node or a reference.
@@ -125,10 +131,14 @@ type Notifier struct {
 	BotToken Secret `yaml:"-"`
 }
 
-// Load reads, defaults and validates the file at path and resolves secrets.
+// Load is LoadEnv on the real machine.
+func Load(path string) (*Config, []string, error) { return LoadEnv(path, SystemEnv()) }
+
+// LoadEnv reads, defaults and validates the file at path and resolves
+// secrets. A target without node gets the local bitcoind, detected in env.
 // Every problem is reported in one joined error. Warnings are non-fatal
 // findings, such as a secret file readable by others.
-func Load(path string) (*Config, []string, error) {
+func LoadEnv(path string, env Env) (*Config, []string, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, NoConfigError{path, err}
@@ -154,7 +164,7 @@ func Load(path string) (*Config, []string, error) {
 		return nil, nil, fmt.Errorf("%s: invalid config:\n%w", path, yamlError(raw, err))
 	}
 	v := &validator{}
-	c.validate(v)
+	c.validate(v, env)
 	if err := errors.Join(v.errs...); err != nil {
 		return nil, v.warns, fmt.Errorf("%s: invalid config:\n%w", path, err)
 	}
@@ -199,7 +209,7 @@ func (v *validator) bad(path, value, format string, a ...any) {
 	v.errf(fmt.Sprintf("%s %q", path, value), "%s", msg)
 }
 
-func (c *Config) validate(v *validator) {
+func (c *Config) validate(v *validator, env Env) {
 	c.StateFile = expandHome(c.StateFile)
 	if c.StateFile != "" && !filepath.IsAbs(c.StateFile) {
 		v.bad("state_file", c.StateFile, "must be an absolute path or start with ~/")
@@ -244,6 +254,20 @@ func (c *Config) validate(v *validator) {
 		}
 		targets[t.Name] = true
 
+		chain := ChainMain // of the default references
+		if t.Node == (Endpoint{}) {
+			if c.Detected == nil {
+				d := env.Detect()
+				c.Detected = &d
+			}
+			t.Node = Endpoint{Kind: KindBitcoind, URL: c.Detected.URL, CookieFile: c.Detected.CookieFile}
+			chain = c.Detected.Chain
+		} else if t.Node.Kind == KindBitcoind {
+			chain = portChain(t.Node.URL)
+		}
+		if t.References == nil {
+			t.References, t.DefaultRefs = DefaultReferences(chain), true
+		}
 		t.Node.validate(v, p+".node", NodeKinds, c)
 		seen := map[string]bool{t.Node.URL: true}
 		for j := range t.References {
@@ -264,6 +288,11 @@ func (c *Config) validate(v *validator) {
 		}
 		t.Alert.validate(v, p+".alert")
 
+		if t.Notify == nil {
+			for _, n := range c.Notifiers {
+				t.Notify = append(t.Notify, n.Name)
+			}
+		}
 		if len(t.Notify) == 0 {
 			v.errf(p+".notify", "at least one notifier is required")
 		}
@@ -345,9 +374,13 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 }
 
 func (a *Alert) validate(v *validator, p string) {
-	if a.Threshold == nil {
-		v.errf(p+".threshold", "required (lag in blocks)")
-		return
+	if a.Threshold == nil { // the balanced preset
+		a.Threshold = new(uint64)
+		*a.Threshold = defaultThreshold
+		if a.RecoverThreshold == nil {
+			a.RecoverThreshold = new(uint64)
+			*a.RecoverThreshold = defaultRecover
+		}
 	}
 	if a.RecoverThreshold == nil {
 		a.RecoverThreshold = a.Threshold

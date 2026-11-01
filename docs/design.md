@@ -282,8 +282,14 @@ as a hint, and every error is reported in one go. The full reference is in
 [configuration.md](configuration.md), and an annotated example in
 [examples/config.yaml](../examples/config.yaml).
 
-Required values have no hidden defaults: `alert.threshold` must be set,
-because a sensible value depends on the chain and on the user's tolerance.
+A target needs only a name. Its `node` defaults to the local bitcoind,
+found from `bitcoin.conf` and the known datadirs; its `references` to the
+public Esplora APIs of the node's chain; `alert` to the balanced preset
+(3/1/2); `notify` to every notifier. This relaxes the earlier rule that
+required values have no hidden defaults: the defaults are documented, the
+detected node and the public references are logged at start, and a
+reference on another chain than the node counts as failed. Values that
+are set are used as they are.
 
 ## 6. Security
 

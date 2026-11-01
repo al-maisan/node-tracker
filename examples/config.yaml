@@ -3,6 +3,10 @@
 #
 # Default location: ~/.config/node-tracker/config.yaml
 # Check it with:    node-tracker check
+#
+# Only a target's name and a notifier are required. For a bitcoind on this
+# machine, node, references, alert and notify can be left out: see
+# "Minimal config" in docs/configuration.md.
 
 # Time between ticks in `run` (daemon) mode. Ignored by `once`.
 interval: 30s
@@ -15,7 +19,7 @@ timeout: 10s
 
 targets:
   - name: my-node                       # used in alerts; letters, digits, . _ -
-    node:
+    node:                               # optional; default: the local bitcoind, detected
       kind: bitcoind
       url: http://127.0.0.1:8332
       # Bitcoin Core writes this file on start; the user running
@@ -27,6 +31,8 @@ targets:
       # password_env: NODE_TRACKER_RPC_PASSWORD
 
     # Independent views of the chain tip. Use at least two you trust.
+    # Optional; default: these two on mainnet, mempool.space on test
+    # chains, none on regtest. references: [] means none.
     references:
       - kind: esplora
         url: https://mempool.space/api
@@ -34,12 +40,12 @@ targets:
         url: https://blockstream.info/api
     # reference_outlier: 6    # with 3+ references: ignore one this far above all others (0 = off)
 
-    alert:
+    alert:                    # optional; default: the balanced preset below
       threshold: 3            # LAGGING when the node is more than 3 blocks behind
       recover_threshold: 1    # optional; back to OK at 1 block or less (default: threshold)
       for: 2                  # optional; a change must be seen 2 ticks in a row (default 2)
 
-    notify: [telegram]
+    notify: [telegram]        # optional; default: every notifier
 
 notifiers:
   - name: telegram
