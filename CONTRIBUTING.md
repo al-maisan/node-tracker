@@ -20,10 +20,12 @@ make integration  # needs bitcoind in PATH; starts a throwaway regtest node
 make build        # bin/node-tracker with version, commit and build time
 make dist         # release archives + SHA256SUMS in dist/ (needs GNU tar)
 make test-ppa     # tests of the packaging scripts
+make test-copr    # tests of the COPR scripts
+make srpm         # source RPM of the newest stable tag (rpmbuild)
 ```
 
-CI runs `lint`, `test`, `test-ppa`, `vuln` and `dist`, and checks the
-Homebrew formula syntax, on every pull request.
+CI runs `lint`, `test`, `test-ppa`, `test-copr`, `vuln` and `dist`, and
+checks the Homebrew formula syntax, on every pull request.
 
 A new command or flag also goes into the man page, `node-tracker.1`;
 `make test` fails until it does. Check the rendering with
@@ -52,11 +54,20 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    `scripts/install-units.sh`, `deploy/sysusers.d`) comes from the
    checkout, so a fix also applies to older tags. It needs `go`, `gh`,
    `curl`, `python3`, `debuild` and `dput`.
+5. Run `make copr` to build the tag in COPR `al-maisan/node-tracker`. It
+   builds for every Fedora that is released (fedoraproject.org) and still
+   maintained (Bodhi), on x86_64 and aarch64, and enables new chroots in
+   the project. Chroots that already have the version are skipped;
+   `COPR_FORCE=1` rebuilds, `COPR_CHROOTS="fedora-44-x86_64"` picks
+   chroots. It uploads a source RPM (`make srpm`; packaging from
+   `node-tracker.spec` in the checkout) with `copr-cli`, so it needs a
+   COPR API token in `~/.config/copr` but no key touch. It also needs
+   `rpmbuild`.
 
-`make publish` runs `release` and then `ppa`.
+`make publish` runs `release`, `ppa` and `copr`.
 
 The package changelogs list the commits since the previous GitHub release,
-so run `make ppa` after `make release`.
+so run `make ppa` and `make copr` after `make release`.
 
 Release builds use the official Go toolchain pinned in
 `scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and

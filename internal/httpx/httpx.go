@@ -13,9 +13,15 @@ import (
 // NewClient returns a client that honours HTTP(S)_PROXY / NO_PROXY
 // (including socks5:// for Tor) and never follows redirects, so a reference
 // can't bounce requests elsewhere. Timeouts come from the request context.
-func NewClient() *http.Client {
+func NewClient() *http.Client { return newClient(http.ProxyFromEnvironment) }
+
+// NewProxyClient is NewClient, but sends every request through proxy
+// (socks5, socks5h, http or https) and ignores the environment.
+func NewProxyClient(proxy *url.URL) *http.Client { return newClient(http.ProxyURL(proxy)) }
+
+func newClient(proxy func(*http.Request) (*url.URL, error)) *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Proxy = http.ProxyFromEnvironment
+	t.Proxy = proxy
 	return &http.Client{
 		Transport: t,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

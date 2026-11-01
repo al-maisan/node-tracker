@@ -60,8 +60,9 @@ delivers this:
   works.
 - **Secure by default.** Secrets come only from files or environment
   variables, never from the config file. Tokens are scrubbed from errors and
-  logs. Plain HTTP is allowed only to localhost. Tor/SOCKS5 proxies are
-  supported, and only the read-only `getblockchaininfo` RPC is used.
+  logs. Plain HTTP is allowed only to localhost and to `.onion` hosts
+  through a local Tor. Tor/SOCKS5 proxies are supported, per endpoint too,
+  and only the read-only `getblockchaininfo` RPC is used.
 - **One small static binary.** The Go standard library plus a YAML parser;
   no runtime and no database.
 
@@ -99,7 +100,13 @@ delivers this:
    sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker
    ```
 
-   The package installs `/usr/bin/node-tracker` with its man page, the
+   Or, on Fedora (x86_64, aarch64):
+
+   ```sh
+   sudo dnf copr enable al-maisan/node-tracker && sudo dnf install node-tracker
+   ```
+
+   Either package installs `/usr/bin/node-tracker` with its man page, the
    systemd units (none is enabled) and a `node-tracker` system user. The
    docs and example config are in `/usr/share/doc/node-tracker`; see
    [docs/operations.md](docs/operations.md#from-a-package) for the setup.

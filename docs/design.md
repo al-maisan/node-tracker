@@ -301,11 +301,16 @@ because a sensible value depends on the chain and on the user's tolerance.
   - Telegram messages are HTML-escaped, so node data can't inject markup.
 - **Transport:**
   - URLs may not contain credentials.
-  - Plain `http://` is accepted only for loopback hosts, unless
-    `allow_insecure: true` is set (LAN, Tor).
+  - Plain `http://` is accepted only for loopback hosts, and for `.onion`
+    hosts through a loopback proxy, unless `allow_insecure: true` is set
+    (LAN).
 - **Proxy / Tor:** `HTTPS_PROXY` / `NO_PROXY` are honoured, including
   `socks5://`, so references and Telegram can go through Tor without
-  exposing the operator's IP.
+  exposing the operator's IP. An endpoint with `proxy:` gets its own client,
+  hardened the same way, that uses only that proxy. `.onion` endpoints
+  without one use the environment's proxy, else Tor's
+  `socks5://127.0.0.1:9050`, and a per-call timeout of at least 30s. Plain
+  http to them needs no `allow_insecure` only through a loopback proxy.
 - **Least privilege:**
   - The tool runs as an unprivileged user.
   - The system unit is hardened: empty capability set, `ProtectSystem=strict`,
@@ -333,6 +338,10 @@ because a sensible value depends on the chain and on the user's tolerance.
 ```
 TARGET   STATE  NODE    TIP     LAG  TIP FROM               ERROR
 orendil  OK     974084  974085  1    esplora:mempool.space
+
+TARGET   ENDPOINT                 PROXY
+orendil  bitcoind:127.0.0.1:8332  none
+orendil  esplora:mempool.space    socks5://127.0.0.1:9050 (environment)
 ```
 
 Exit codes are chosen so cron and systemd can act on them:
@@ -397,4 +406,5 @@ because a person reads them.
 Release archives and signed checksums: `make dist` / `make release`, see
 CONTRIBUTING.md. Homebrew: `brew install al-maisan/tap/node-tracker`, the
 formula is written by `make release`. Ubuntu: `ppa:al-maisan/node-tracker`,
-uploaded by `make ppa`. Other packaging (AUR) is tracked in issue #8.
+uploaded by `make ppa`. Fedora: COPR `al-maisan/node-tracker`, built by
+`make copr`. Other packaging (AUR) is tracked in issue #8.

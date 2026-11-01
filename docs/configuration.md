@@ -47,7 +47,7 @@ A commented example is in [examples/config.yaml](../examples/config.yaml).
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `interval` | duration | `30s` | Time between ticks in `run` mode. Minimum `1s`. Ignored by `once`. |
-| `timeout` | duration | `10s` | Timeout of each single call to a node, reference or notifier. Must be > 0 and ≤ `interval`. |
+| `timeout` | duration | `10s` | Timeout of each single call to a node, reference or notifier. Must be > 0 and ≤ `interval`. `.onion` endpoints get at least `30s` (see [Tor](#proxies-and-tor)). |
 | `state_file` | path | `$XDG_STATE_HOME/node-tracker/state.json` (else `~/.local/state/…`) | Where states and undelivered alerts are kept. `-state` overrides it. |
 | `targets` | list | *required* | Nodes to watch, at least one. |
 | `notifiers` | list | | Alert channels. |
@@ -116,6 +116,7 @@ Bitcoin Core JSON-RPC. Only `getblockchaininfo` is called.
 | `cookie_file` | Bitcoin Core's `.cookie` (e.g. `~/.bitcoin/.cookie`, `/var/lib/bitcoind/.cookie`). It is re-read on every call, so a node restart, which writes a new cookie, needs no action. |
 | `username` + `password_file` / `password_env` | Use these instead of the cookie, with `rpcauth` credentials. |
 | `allow_insecure` | Allow plain `http://` to a non-loopback host (see below). |
+| `proxy` | Optional proxy for this endpoint only (see [Proxies and Tor](#proxies-and-tor)). |
 
 Set exactly one of `cookie_file` or `username`.
 
@@ -136,14 +137,16 @@ Esplora REST API: `GET {url}/blocks/tip/height`.
 |---|---|
 | `url` | API root, e.g. `https://mempool.space/api`, `https://blockstream.info/api`, or your own esplora/mempool instance. |
 | `allow_insecure` | Allow plain `http://` to a non-loopback host. |
+| `proxy` | Optional proxy for this endpoint only. |
 
 ### Plain HTTP
 
 `http://` is accepted without extra settings only for `localhost`,
-`127.0.0.0/8` and `::1`. Any other `http://` URL needs
+`127.0.0.0/8`, `::1` and, for nodes and references, `.onion` hosts reached
+through a loopback proxy (Tor encrypts the traffic itself). Any other `http://` endpoint URL needs
 `allow_insecure: true`. Set it only when the network path is trusted, for
-example a LAN, a WireGuard tunnel, or an `.onion` address through Tor (Tor
-encrypts the traffic itself).
+example a LAN or a WireGuard tunnel. A notifier's `api_url` must use
+`https://` unless its host is loopback, `.onion` included.
 
 ## `notifiers[]`
 
@@ -164,9 +167,52 @@ encrypts the traffic itself).
 
 ## Proxies and Tor
 
-HTTP requests use the standard proxy variables `HTTPS_PROXY`, `HTTP_PROXY`
-and `NO_PROXY`, and `socks5://` proxies are supported. To send references
-and Telegram through Tor while the local node is reached directly:
+An endpoint with `proxy:` sends its requests through that proxy and
+ignores the proxy environment variables:
+
+```yaml
+node:
+  kind: bitcoind
+  url: https://node.example.com:8332
+  proxy: socks5://127.0.0.1:9050
+```
+
+- Schemes: `socks5`, `socks5h`, `http`, `https`. Both SOCKS schemes send
+  the host name to the proxy, so nothing is resolved locally.
+- Only `scheme://host:port`. Proxy credentials are not supported, so a
+  proxy URL never holds a secret.
+- `node-tracker check` prints the proxy of every endpoint.
+
+**`.onion` hosts** need nothing but the URL and the auth fields:
+
+```yaml
+node:
+  kind: bitcoind
+  url: http://<56 characters>.onion:8332
+  username: tracker
+  password_file: ~/.config/node-tracker/rpc-password
+```
+
+- Without `proxy:`, the proxy from the environment for that URL is used
+  (`HTTP_PROXY` for `http://`, honouring `NO_PROXY`), as before per-endpoint
+  proxies existed. If there is none, it is `socks5://127.0.0.1:9050`, Tor's
+  SOCKS port. Set `proxy:` to use another one, e.g. Tor Browser's
+  `socks5://127.0.0.1:9150`. `check` shows which one is used: `(default)`,
+  `(environment)`, or the `proxy:` value.
+- Plain `http://` is allowed without `allow_insecure` only if that proxy is
+  on a loopback address (`127.0.0.0/8`, `::1`, `localhost`). From there on
+  Tor encrypts, but the hop to a proxy elsewhere, e.g. Tor on another LAN
+  host, carries the RPC credentials in clear. That needs
+  `allow_insecure: true`.
+- Each call gets `max(timeout, 30s)`, but at most `interval`, as Tor round
+  trips often take several seconds.
+- The address must be a valid v3 onion address (56 characters, with a
+  checksum), so a typo is reported by `check` instead of a Tor timeout.
+
+Endpoints without `proxy:`, and notifiers, use the standard proxy variables
+`HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, and `socks5://` proxies are
+supported. To send references and Telegram through Tor while the local
+node is reached directly:
 
 ```sh
 HTTPS_PROXY=socks5://127.0.0.1:9050 NO_PROXY=127.0.0.1,localhost node-tracker run

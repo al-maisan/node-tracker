@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -42,6 +44,54 @@ func TestDo(t *testing.T) {
 	defer cancel()
 	if _, _, err := get(ctx, "/slow"); err == nil {
 		t.Error("slow: want timeout")
+	}
+}
+
+// A proxy client sends everything through its proxy, with the same
+// hardening; NewClient does not use it.
+func TestNewProxyClient(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	seen := func() string { mu.Lock(); defer mu.Unlock(); return strings.Join(got, " ") }
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.URL.String()) // a proxy gets the absolute URL
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/redirect":
+			http.Redirect(w, r, "/small", http.StatusFound)
+		case "/big":
+			w.Write([]byte(strings.Repeat("x", 1000)))
+		default:
+			w.Write([]byte("via proxy"))
+		}
+	}))
+	defer proxy.Close()
+	u, _ := url.Parse(proxy.URL)
+	c := NewProxyClient(u)
+	get := func(path string) (int, []byte, error) {
+		req, _ := http.NewRequest(http.MethodGet, "http://node.invalid:8332"+path, nil)
+		return Do(c, req, 100)
+	}
+	if st, b, err := get("/small"); err != nil || st != 200 || string(b) != "via proxy" {
+		t.Fatalf("small: %d %q %v", st, b, err)
+	}
+	if st, _, err := get("/redirect"); err != nil || st != http.StatusFound {
+		t.Errorf("redirect must not be followed: %d %v", st, err)
+	}
+	if _, _, err := get("/big"); err == nil {
+		t.Error("big: want size error")
+	}
+	want := "http://node.invalid:8332/small http://node.invalid:8332/redirect http://node.invalid:8332/big"
+	if seen() != want {
+		t.Errorf("proxy got %q, want %q", seen(), want)
+	}
+
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer direct.Close()
+	req, _ := http.NewRequest(http.MethodGet, direct.URL, nil)
+	if _, _, err := Do(NewClient(), req, 100); err != nil || seen() != want {
+		t.Errorf("NewClient must not use the proxy: %v, proxy saw %q", err, seen())
 	}
 }
 

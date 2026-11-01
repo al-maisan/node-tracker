@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,20 @@ import (
 )
 
 const secret = "123456:TOP-SECRET"
+
+// proxyEnv are the variables http.ProxyFromEnvironment reads.
+var proxyEnv = []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD"}
+
+// TestMain clears the proxy environment, so the developer's one can't change
+// results. A child of TestOnionEnvProxy keeps the one it was given.
+func TestMain(m *testing.M) {
+	if os.Getenv(envChild) == "" {
+		for _, k := range proxyEnv {
+			os.Unsetenv(k)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 // write puts the config and a token file in a temp dir.
 func write(t *testing.T, cfg string) string {
@@ -136,7 +151,7 @@ func TestErrorShowsValue(t *testing.T) {
 		{"bad port", "http://127.0.0.1:8332", "http://127.0.0.1:rpc",
 			`targets[0].node.url "http://127.0.0.1:rpc": invalid port ":rpc" after host`},
 		{"plain http", "http://127.0.0.1:8332", "http://10.0.0.5:8332",
-			`targets[0].node.url "http://10.0.0.5:8332": plain http is only allowed for loopback hosts`},
+			`targets[0].node.url "http://10.0.0.5:8332": plain http is only allowed for loopback and .onion hosts`},
 		{"kind", "kind: bitcoind", "kind: geth", `targets[0].node.kind "geth": must be one of [bitcoind]`},
 		{"chat id placeholder", `"-1001234567890"`, `"<chat id>"`,
 			`notifiers[0].chat_id "<chat id>": must be a numeric chat id or @channelname; this looks like a placeholder`},
@@ -189,6 +204,171 @@ func TestURLPasswordNeverShown(t *testing.T) {
 				t.Fatalf("error leaks the password: %v", err)
 			}
 		})
+	}
+}
+
+// Tor Project's v3 onion address; its checksum is valid.
+const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+
+func TestProxy(t *testing.T) {
+	const node = "      url: http://127.0.0.1:8332\n"
+	tests := []struct{ name, proxy, want string }{
+		{"socks5", "socks5://127.0.0.1:9050", ""},
+		{"socks5h", "socks5h://localhost:9050/", ""},
+		{"http", "http://10.0.0.1:3128", ""},
+		{"https", "https://proxy.example.com", ""},
+		{"bad scheme", "ftp://127.0.0.1:21", `proxy "ftp://127.0.0.1:21": scheme must be one of [socks5 socks5h http https]`},
+		{"no scheme", "127.0.0.1:9050", `proxy "127.0.0.1:9050": missing scheme; e.g. socks5://127.0.0.1:9050`},
+		{"credentials", "socks5://u:s3cr3tPW@127.0.0.1:9050", `proxy "socks5://REDACTED@127.0.0.1:9050": must not contain credentials`},
+		{"path", "http://10.0.0.1:3128/x", `proxy "http://10.0.0.1:3128/x": must be scheme://host:port`},
+		{"no host", "socks5://", `proxy "socks5://": must be scheme://host:port`},
+		{"env var", "socks5://$TOR:9050", `proxy "socks5://$TOR:9050": invalid character "$" in host name; YAML`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _, err := Load(write(t, strings.Replace(valid, node, node+"      proxy: "+tt.proxy+"\n", 1)))
+			switch {
+			case tt.want == "" && err != nil:
+				t.Fatal(err)
+			case tt.want == "" && (c.Targets[0].Node.Proxy != tt.proxy || c.Targets[0].Node.Timeout != 0):
+				t.Fatalf("node = %+v", c.Targets[0].Node)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), "targets[0].node."+tt.want)):
+				t.Fatalf("err = %v, want %s", err, tt.want)
+			case err != nil && strings.Contains(err.Error(), "s3cr3tPW"):
+				t.Fatalf("error leaks the password: %v", err)
+			}
+		})
+	}
+}
+
+func TestOnion(t *testing.T) {
+	const lan = `plain http to .onion needs a loopback proxy; `
+	tests := []struct {
+		name, url, proxy string
+		insecure         bool
+		wantProxy        string
+		wantErr          string
+	}{
+		{"defaults", "http://" + onion + ":8332", "", false, DefaultTorProxy, ""},
+		{"upper case", "http://" + strings.ToUpper(onion) + ":8332", "", false, DefaultTorProxy, ""},
+		{"subdomain", "https://www." + onion, "", false, DefaultTorProxy, ""},
+		{"own local proxy", "http://" + onion + ":8332", "socks5://127.0.0.1:9150", false, "socks5://127.0.0.1:9150", ""},
+		{"localhost proxy", "http://" + onion + ":8332", "socks5h://localhost:9050", false, "socks5h://localhost:9050", ""},
+		{"ipv6 loopback proxy", "http://" + onion + ":8332", "socks5://[::1]:9050", false, "socks5://[::1]:9050", ""},
+		{"LAN proxy", "http://" + onion + ":8332", "socks5h://192.168.1.10:9050", false, "", lan + `"socks5h://192.168.1.10:9050" would see the RPC credentials`},
+		{"http proxy", "http://" + onion + ":8332", "http://proxy.corp:3128", false, "", lan + `"http://proxy.corp:3128" would see`},
+		{"LAN proxy, allow_insecure", "http://" + onion + ":8332", "socks5h://192.168.1.10:9050", true, "socks5h://192.168.1.10:9050", ""},
+		{"LAN proxy, https", "https://" + onion, "socks5h://192.168.1.10:9050", false, "socks5h://192.168.1.10:9050", ""},
+		{"v2", "http://expyuzz4wqqyqhjn.onion", "", false, "", "not a v3 onion address"},
+		{"typo", "http://3gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion", "", false, "", "checksum mismatch"},
+		{"not base32", "http://1gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion", "", false, "", "not a v3 onion address"},
+		{"bad proxy", "http://" + onion, "tor://x", false, "", "scheme must be one of"},
+	}
+	t.Run("notifier api_url", func(t *testing.T) { // the .onion exemption is for endpoints only
+		cfg := strings.Replace(valid, `chat_id: "-1001234567890"`, `chat_id: "-1001234567890"`+"\n    api_url: http://"+onion, 1)
+		want := "\n" + `notifiers[0].api_url "http://` + onion + `": plain http is only allowed for loopback hosts; use https`
+		if _, _, err := Load(write(t, cfg)); err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Fatalf("err = %v, want %s", err, want)
+		}
+	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := "url: " + tt.url
+			if tt.proxy != "" {
+				e += "\n      proxy: " + tt.proxy
+			}
+			if tt.insecure {
+				e += "\n      allow_insecure: true"
+			}
+			c, _, err := Load(write(t, strings.Replace(valid, "url: http://127.0.0.1:8332", e, 1)))
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := c.Targets[0].Node; n.Proxy != tt.wantProxy || n.DefaultProxy != (tt.proxy == "") || n.Timeout != 30*time.Second {
+				t.Fatalf("proxy = %q default = %v timeout = %s, want %q 30s", n.Proxy, n.DefaultProxy, n.Timeout, tt.wantProxy)
+			}
+			if r := c.Targets[0].References[0]; r.Proxy != "" || r.Timeout != 0 {
+				t.Fatalf("reference got onion defaults: %+v", r)
+			}
+		})
+	}
+}
+
+const envChild = "NT_TEST_ENV_PROXY_CONFIG"
+
+// A .onion endpoint without proxy uses the environment's proxy, as net/http
+// would, else DefaultTorProxy. net/http reads the environment once per
+// process, so each case runs Load in a child process.
+func TestOnionEnvProxy(t *testing.T) {
+	if path := os.Getenv(envChild); path != "" {
+		c, _, err := Load(path)
+		if err != nil {
+			fmt.Printf("RESULT error: %v\n", err)
+		} else {
+			fmt.Printf("RESULT proxy=%q default=%v\n", c.Targets[0].Node.Proxy, c.Targets[0].Node.DefaultProxy)
+		}
+		os.Exit(0)
+	}
+	url := "url: http://" + onion + ":8332"
+	tests := []struct {
+		name, env, extra, want string
+	}{
+		{"no env", "", "", `proxy="socks5://127.0.0.1:9050" default=true`},
+		{"local Tor Browser", "HTTP_PROXY=socks5://127.0.0.1:9150", "", `proxy="" default=false`},
+		{"lower case", "http_proxy=socks5://localhost:9050", "", `proxy="" default=false`},
+		{"LAN", "HTTP_PROXY=socks5://192.168.1.10:9050", "",
+			`targets[0].node.url "http://` + onion + `:8332": plain http to .onion needs a loopback proxy; "socks5://192.168.1.10:9050" (environment) would see`},
+		{"LAN with credentials", "HTTP_PROXY=http://u:s3cr3tPW@10.0.0.1:3128", "", `"http://REDACTED@10.0.0.1:3128" (environment) would see`},
+		{"LAN, allow_insecure", "HTTP_PROXY=socks5://192.168.1.10:9050", "\n      allow_insecure: true", `proxy="" default=false`},
+		{"NO_PROXY", "HTTP_PROXY=socks5://192.168.1.10:9050 NO_PROXY=.onion", "", `proxy="socks5://127.0.0.1:9050" default=true`},
+		{"HTTPS_PROXY ignored for http", "HTTPS_PROXY=socks5://192.168.1.10:9050", "", `proxy="socks5://127.0.0.1:9050" default=true`},
+		{"explicit proxy wins", "HTTP_PROXY=socks5://192.168.1.10:9050", "\n      proxy: socks5://127.0.0.1:9150", `proxy="socks5://127.0.0.1:9150" default=false`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := write(t, strings.Replace(valid, "url: http://127.0.0.1:8332", url+tt.extra, 1))
+			cmd := exec.Command(os.Args[0], "-test.run=^TestOnionEnvProxy$")
+			cmd.Env = os.Environ()
+			for _, k := range proxyEnv {
+				cmd.Env = append(cmd.Env, k+"=")
+			}
+			cmd.Env = append(append(cmd.Env, envChild+"="+path), strings.Fields(tt.env)...)
+			out, err := cmd.CombinedOutput()
+			if err != nil || !strings.Contains(string(out), "RESULT ") || !strings.Contains(string(out), tt.want) {
+				t.Fatalf("got %s(%v), want %s", out, err, tt.want)
+			}
+			if strings.Contains(string(out), "s3cr3tPW") {
+				t.Fatalf("leaks the proxy password: %s", out)
+			}
+		})
+	}
+}
+
+// .onion: per-call timeout is max(timeout, 30s), at most interval.
+func TestOnionTimeout(t *testing.T) {
+	for _, tt := range []struct {
+		top  string
+		want time.Duration
+	}{
+		{"", 30 * time.Second},
+		{"timeout: 45s\ninterval: 1m\n", 45 * time.Second},
+		{"interval: 20s\n", 20 * time.Second},
+		{"interval: 2m\n", 30 * time.Second},
+	} {
+		cfg := tt.top + strings.Replace(valid, "url: http://127.0.0.1:8332", "url: http://"+onion+":8332", 1)
+		c, _, err := Load(write(t, cfg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Targets[0].Node.Timeout; got != tt.want {
+			t.Errorf("%q: timeout = %s, want %s", tt.top, got, tt.want)
+		}
 	}
 }
 

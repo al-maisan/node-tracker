@@ -5,6 +5,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // MaxHeight bounds any height we accept. It is far above any real chain
@@ -22,6 +23,23 @@ type Height struct {
 type Source interface {
 	Name() string
 	Height(ctx context.Context) (Height, error)
+}
+
+// WithTimeout gives s its own per-call timeout d, which the monitor uses
+// instead of its default.
+func WithTimeout(s Source, d time.Duration) Source { return timed{s, d} }
+
+type timed struct {
+	Source
+	timeout time.Duration
+}
+
+// Timeout is s's own per-call timeout, or def if it has none.
+func Timeout(s Source, def time.Duration) time.Duration {
+	if t, ok := s.(timed); ok {
+		return t.timeout
+	}
+	return def
 }
 
 // Check validates a parsed height.

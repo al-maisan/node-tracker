@@ -46,8 +46,8 @@ edit `OnUnitActiveSec=`.
 
 ### From a package
 
-The deb package has installed the binary, the units and the `node-tracker`
-user, so only the config and the token are left:
+The deb or rpm package has installed the binary, the units and the
+`node-tracker` user, so only the config and the token are left:
 
 ```sh
 sudo install -d -m 750 -o root -g node-tracker /etc/node-tracker
@@ -132,19 +132,19 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
    ```
 
 3. **Config:** write the onion address out in full (YAML does not expand
-   `$ONION`), use `username` + `password_file` instead of `cookie_file`,
-   and allow plain http: Tor encrypts the traffic itself. Tor round trips
-   can take several seconds, so raise `timeout`:
+   `$ONION`) and use `username` + `password_file` instead of `cookie_file`.
+   Nothing else is needed: for a `.onion` URL, node-tracker goes through
+   Tor's SOCKS port `127.0.0.1:9050` (or `HTTP_PROXY`, if set), allows plain
+   http (Tor encrypts the traffic itself) and gives each call at least 30s
+   (at most `interval`).
+   The references and Telegram stay direct.
 
    ```yaml
-   interval: 30s
-   timeout: 25s            # must be <= interval
    targets:
      - name: my-node
        node:
          kind: bitcoind
          url: http://abc…xyz.onion:8332
-         allow_insecure: true
          username: nodetracker
          password_file: ~/.config/node-tracker/node-rpc-password   # chmod 600
        references:
@@ -157,29 +157,11 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
        notify: [telegram]
    ```
 
-4. **Proxy:** node-tracker uses the standard `HTTP_PROXY` / `HTTPS_PROXY`
-   / `NO_PROXY` variables, and `socks5://` works. Hostnames are resolved by
-   the proxy, so `.onion` works. Set only `HTTP_PROXY`: the onion URL is
-   `http://` and goes through Tor, while the `https://` references and
-   Telegram stay direct.
-
-   ```sh
-   HTTP_PROXY=socks5://127.0.0.1:9050 node-tracker check
-   ```
-
-   With systemd, every service that talks to the node needs the proxy: the
-   daemon, and `node-tracker-once` / `node-tracker-report` if you use the
-   timers. User services:
-
-   ```sh
-   for u in node-tracker node-tracker-once node-tracker-report; do mkdir -p ~/.config/systemd/user/$u.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' > ~/.config/systemd/user/$u.service.d/tor.conf; done && systemctl --user daemon-reload && systemctl --user try-restart node-tracker
-   ```
-
-   System services:
-
-   ```sh
-   for u in node-tracker node-tracker-once node-tracker-report; do sudo mkdir -p /etc/systemd/system/$u.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' | sudo tee /etc/systemd/system/$u.service.d/tor.conf >/dev/null; done && sudo systemctl daemon-reload && sudo systemctl try-restart node-tracker
-   ```
+   If Tor's SOCKS port is elsewhere, set `proxy: socks5://host:port` on the
+   node. If that host is not loopback, e.g. Tor on another LAN machine, the
+   RPC credentials cross the LAN in clear, so node-tracker also requires
+   `allow_insecure: true`. `node-tracker check` shows the proxy each
+   endpoint uses. The services need no environment variable or drop-in.
 
 If Tor on the monitoring host stops, the node shows as `NODE_DOWN`: it
 can't be watched then, so that is the right alert.
@@ -274,4 +256,6 @@ overwritten.
 | exit code 3 every run | Another node-tracker (daemon or timer) uses the same state file. Run only one. |
 | `state file … is corrupt` | See [The state file](#the-state-file). |
 | no Telegram message | `node-tracker test-notify`, then see [telegram.md](telegram.md). |
-| `plain http is only allowed for loopback hosts` | Use https, or set `allow_insecure: true` on that endpoint if the path is trusted (LAN, Tor). |
+| `plain http is only allowed for loopback and .onion hosts` | Use https, or set `allow_insecure: true` on that endpoint if the path is trusted (LAN). |
+| `.onion` node is `NODE_DOWN` | Is Tor running (`systemctl status tor`)? `check` shows the proxy in use; set `proxy:` if Tor's SOCKS port is not `127.0.0.1:9050`. |
+| `plain http to .onion needs a loopback proxy` | The proxy is on another host, which would see the RPC credentials. Run Tor locally, or set `allow_insecure: true` if that network is trusted. |
