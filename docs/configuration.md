@@ -181,7 +181,8 @@ node:
   the host name to the proxy, so nothing is resolved locally.
 - Only `scheme://host:port`. Proxy credentials are not supported, so a
   proxy URL never holds a secret.
-- `node-tracker check` prints the proxy of every endpoint.
+- `node-tracker check` prints the proxy of every endpoint if any endpoint
+  uses one (always with `-log-level debug`).
 
 **`.onion` hosts** need nothing but the URL and the auth fields:
 

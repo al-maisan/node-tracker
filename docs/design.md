@@ -334,7 +334,7 @@ because a sensible value depends on the chain and on the user's tolerance.
 |---|---|
 | `node-tracker run` | the daemon (§4) |
 | `node-tracker once` | one tick, then exit (cron / timer / manual) |
-| `node-tracker check` | dry run: validate the config, sample every target, print a table. Does not touch state and sends no alerts |
+| `node-tracker check` | dry run: validate the config, sample every target, print a table and a verdict on the setup. Does not touch state and sends no alerts |
 | `node-tracker report` | send a status report of every target to every notifier, whatever the state. Not queued: a report is worthless if late |
 | `node-tracker test-notify [name]` | send a test message through one notifier, or all of them. Useful during setup |
 | `node-tracker install-service -user\|-system` | write the shipped unit with `ExecStart=` set to the running binary and enable it; `-system` also creates the user and installs the config and secrets (see operations.md) |
@@ -349,7 +349,23 @@ orendil  OK     974084  974085  1    esplora:mempool.space
 TARGET   ENDPOINT                 PROXY
 orendil  bitcoind:127.0.0.1:8332  none
 orendil  esplora:mempool.space    socks5://127.0.0.1:9050 (environment)
+
+config             ok
+target orendil     node reachable (cookie) · references 1/1 · OK is the node's current state
+notifier telegram  token valid (@orendil_bot) · chat not tested → run 'node-tracker test-notify telegram'
 ```
+
+- The proxy table is printed only if an endpoint uses a proxy, or with
+  `-log-level debug`.
+- For `NODE_DOWN`, the error gets a hint for common causes: connection
+  refused (bitcoind not running or no `server=1`, wrong port; through a
+  proxy: proxy or Tor not running), HTTP 401 (wrong username/password,
+  stale cookie), HTTP 403 (`rpcallowip`, `rpcwhitelist`), RPC error -28
+  (node still starting), a `.onion` timeout (Tor not bootstrapped).
+- The verdict ends the output. `OK` and `LAGGING` are the monitored state,
+  not setup errors. The bot token is checked with Telegram's `getMe`, which
+  sends nothing; the chat id is only tested by `test-notify`. The verdict
+  does not change the exit code.
 
 Exit codes are chosen so cron and systemd can act on them:
 

@@ -86,3 +86,39 @@ func TestLongMessageIsTruncated(t *testing.T) {
 		t.Fatalf("utf16 len = %d", n)
 	}
 }
+
+func TestCheckToken(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		status     int
+		want       string
+		wantBad    bool
+		wantErr    bool
+	}{
+		{"valid", `{"ok":true,"result":{"id":1,"is_bot":true,"username":"nt_bot"}}`, 200, "nt_bot", false, false},
+		{"rejected", `{"ok":false,"description":"Unauthorized"}`, 401, "", true, true},
+		{"malformed token", `{"ok":false,"description":"Not Found"}`, 404, "", true, true},
+		{"server error", `bad gateway`, 502, "", false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/bot"+token+"/getMe" {
+					t.Errorf("request = %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+			got, err := New("tg", srv.URL, token, "-100", httpx.NewClient()).CheckToken(context.Background())
+			if got != tt.want || (err != nil) != tt.wantErr || errors.Is(err, ErrBadToken) != tt.wantBad {
+				t.Fatalf("got %q, %v", got, err)
+			}
+			if err != nil && strings.Contains(err.Error(), "SECRET") {
+				t.Fatalf("err leaks the token: %v", err)
+			}
+		})
+	}
+	if _, err := New("tg", "http://127.0.0.1:1", token, "-100", httpx.NewClient()).CheckToken(context.Background()); err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("unreachable: err = %v", err)
+	}
+}

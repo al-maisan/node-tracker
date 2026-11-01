@@ -28,6 +28,7 @@ import (
 type world struct {
 	node, tip atomic.Int64
 	tgDown    atomic.Bool
+	rpcFail   atomic.Value // string: "" answers, else "401", "403" or "-28"
 	mu        sync.Mutex
 	sent      []string // telegram message texts
 	srv       *httptest.Server
@@ -35,12 +36,21 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	w := &world{}
+	w.rpcFail.Store("")
 	w.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/rpc" && w.rpcFail.Load() == "-28":
+			http.Error(rw, `{"result":null,"error":{"code":-28,"message":"Loading block index…"}}`, http.StatusInternalServerError)
+		case r.URL.Path == "/rpc" && w.rpcFail.Load() == "401":
+			rw.WriteHeader(http.StatusUnauthorized)
+		case r.URL.Path == "/rpc" && w.rpcFail.Load() == "403":
+			rw.WriteHeader(http.StatusForbidden)
 		case r.URL.Path == "/rpc":
 			fmt.Fprintf(rw, `{"result":{"blocks":%d,"headers":%d},"error":null}`, w.node.Load(), w.node.Load())
 		case r.URL.Path == "/api/blocks/tip/height":
 			fmt.Fprint(rw, w.tip.Load())
+		case r.URL.Path == "/botTOKEN/getMe":
+			fmt.Fprint(rw, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"nt_test_bot"}}`)
 		case r.URL.Path == "/botTOKEN/sendMessage" && w.tgDown.Load():
 			http.Error(rw, "down", http.StatusBadGateway)
 		case r.URL.Path == "/botTOKEN/sendMessage":
@@ -132,6 +142,21 @@ func TestCheckReportAndTestNotify(t *testing.T) {
 	if code != exitOK || !strings.Contains(out, "btc     OK     938266") {
 		t.Fatalf("check: code=%d out=%q", code, out)
 	}
+	for _, want := range []string{
+		"\nconfig       ok\n",
+		"\ntarget btc   node reachable (username/password) · references 1/1 · OK is the node's current state\n",
+		"\nnotifier tg  token valid (@nt_test_bot) · chat not tested → run 'node-tracker test-notify tg'\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("check output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "PROXY") || strings.Contains(out, "TOKEN") {
+		t.Errorf("proxy table without a proxy, or the token:\n%s", out)
+	}
+	if _, out, _ := exec(t, "check", "-config", cfg, "-log-level", "debug"); !regexp.MustCompile(`btc +bitcoind:127\.0\.0\.1:\d+ +none\n`).MatchString(out) {
+		t.Errorf("no proxy table at debug level:\n%s", out)
+	}
 	if _, err := os.Stat(st); err == nil || len(w.messages()) != 0 {
 		t.Fatal("check must not write state or send alerts")
 	}
@@ -148,6 +173,62 @@ func TestCheckReportAndTestNotify(t *testing.T) {
 	}
 	if code, _, _ := exec(t, "test-notify", "-config", cfg, "nope"); code != exitUsage {
 		t.Fatalf("unknown notifier: code=%d", code)
+	}
+}
+
+func TestCheckHints(t *testing.T) {
+	w := newWorld(t)
+	cfg, _ := w.config(t)
+	w.node.Store(100)
+	w.tip.Store(106)
+	code, out, _ := exec(t, "check", "-config", cfg)
+	if code != exitNotInSync || !strings.Contains(out, " · LAGGING by 6 is the node's current state, not a setup error\n") {
+		t.Errorf("lagging: code=%d\n%s", code, out)
+	}
+	for fail, want := range map[string]string{
+		"401": "rpc auth failed (HTTP 401) (wrong username/password, or a stale cookie)",
+		"403": "rpc auth failed (HTTP 403) (not allowed: check rpcallowip, and rpcwhitelist for getblockchaininfo)",
+		"-28": "rpc error -28: Loading block index… (bitcoind is starting; try again when it has loaded)",
+	} {
+		w.rpcFail.Store(fail)
+		code, out, _ := exec(t, "check", "-config", cfg)
+		if code != exitNotInSync || !strings.Contains(out, want+"\n") ||
+			!strings.Contains(out, "node not reachable (see ERROR) · references 1/1\n") {
+			t.Errorf("%s: code=%d, want %q in\n%s", fail, code, want, out)
+		}
+	}
+
+	// Nothing listens on a closed port; a wrong token fails getMe.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	ln.Close()
+	b, _ := os.ReadFile(cfg)
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "url: "+w.srv.URL+"/rpc", "url: http://"+closed+"/rpc", 1)), 0o600)
+	t.Setenv("NT_TEST_TOKEN", "WRONG")
+	code, out, _ = exec(t, "check", "-config", cfg)
+	for _, want := range []string{
+		"connect: connection refused (is bitcoind running with server=1? RPC ports: main 8332",
+		"\nnotifier tg  bot token rejected (HTTP 404) · check bot_token_file / bot_token_env\n",
+	} {
+		if code != exitNotInSync || !strings.Contains(out, want) {
+			t.Errorf("code=%d, want %q in\n%s", code, want, out)
+		}
+	}
+	if strings.Contains(out, "WRONG") {
+		t.Errorf("output shows the token:\n%s", out)
+	}
+
+	// A .onion node whose proxy (Tor) is not running.
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	b, _ = os.ReadFile(cfg)
+	node := fmt.Sprintf("url: http://%s:8332/rpc, proxy: socks5://%s", onion, closed)
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "url: http://"+closed+"/rpc", node, 1)), 0o600)
+	code, out, _ = exec(t, "check", "-config", cfg)
+	if code != exitNotInSync || !strings.Contains(out, "connection refused (is the proxy running? for .onion: is Tor running?)\n") {
+		t.Errorf("proxy down: code=%d\n%s", code, out)
 	}
 }
 

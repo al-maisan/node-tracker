@@ -16,7 +16,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 	"time"
 
 	"github.com/al-maisan/node-tracker/internal/app"
@@ -49,7 +48,7 @@ const usage = `Usage: node-tracker <command> [flags]
 Commands:
   run              run as a daemon, one tick every interval
   once             run one tick and exit (for cron or a systemd timer)
-  check            dry run: sample all targets and print a table; no state, no alerts
+  check            dry run: sample all targets, print a table and a verdict; no state, no alerts
   report           send a status report of all targets to every notifier
   test-notify      send a test message, to one notifier [name] or all
   install-service  write and enable the systemd unit (-user or -system)
@@ -262,31 +261,6 @@ func tick(ctx context.Context, cmd string, m *monitor.Monitor, cfg *config.Confi
 		log.Error("alerts not delivered yet", "pending", pending)
 		return exitFailure
 	}
-	return syncCode(res)
-}
-
-// check prints the observed state of every target, then the proxy of every
-// endpoint.
-func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Writer, log *slog.Logger) int {
-	res, err := m.Observe(ctx, nil)
-	if err != nil {
-		log.Warn("interrupted", "err", err)
-		return exitFailure
-	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "TARGET\tSTATE\tNODE\tTIP\tLAG\tTIP FROM\tERROR")
-	for _, r := range res {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n", r.Target, r.State, r.Node, r.Tip, r.Lag, r.TipFrom, r.Err)
-	}
-	tw.Flush()
-	fmt.Fprintln(w)
-	fmt.Fprintln(tw, "TARGET\tENDPOINT\tPROXY")
-	for _, t := range cfg.Targets {
-		for _, e := range append([]config.Endpoint{t.Node}, t.References...) {
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", t.Name, e.Name, app.Proxy(e))
-		}
-	}
-	tw.Flush()
 	return syncCode(res)
 }
 
