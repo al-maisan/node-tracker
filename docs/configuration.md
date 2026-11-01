@@ -120,6 +120,7 @@ one method. In `bitcoin.conf`:
 ```ini
 rpcauth=tracker:<salt>$<hash>        # from share/rpcauth/rpcauth.py
 rpcwhitelist=tracker:getblockchaininfo
+rpcwhitelistdefault=0                # else users without a whitelist are denied
 ```
 
 ### `kind: esplora`
@@ -168,3 +169,6 @@ HTTPS_PROXY=socks5://127.0.0.1:9050 NO_PROXY=127.0.0.1,localhost node-tracker ru
 
 With systemd, use `Environment=HTTPS_PROXY=socks5://127.0.0.1:9050` in a
 drop-in (`systemctl edit node-tracker`).
+
+To watch a node that is reachable only as a Tor onion service, see
+[Tor](operations.md#tor).

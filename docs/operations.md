@@ -75,6 +75,98 @@ same way, using the `*-once.*` units.
 
 See [deploy/cron/crontab.example](../deploy/cron/crontab.example).
 
+## Tor
+
+node-tracker can watch a node whose RPC is reachable only as a Tor onion
+service, e.g. a home node watched from a VPS. It needs a local Tor SOCKS
+proxy and an `rpcauth` user (the cookie is only readable on the node's host).
+
+1. **On the node**, give node-tracker its own read-only RPC user in
+   `bitcoin.conf` (`rpcauth` line from Bitcoin Core's
+   `share/rpcauth/rpcauth.py nodetracker`), then restart bitcoind:
+
+   ```ini
+   rpcauth=nodetracker:<salt>$<hash>
+   rpcwhitelist=nodetracker:getblockchaininfo
+   rpcwhitelistdefault=0
+   ```
+
+   `rpcwhitelistdefault=0` matters: once any `rpcwhitelist` is set, Bitcoin
+   Core otherwise denies every user without one (the cookie, `bitcoin-cli`,
+   electrs, LND, …).
+
+2. **On the monitoring host**, install Tor and check that its SOCKS port
+   works (Debian/Ubuntu):
+
+   ```sh
+   sudo apt install -y tor && sudo systemctl enable --now tor && curl -s --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip
+   ```
+
+   It must print `"IsTor":true`. Then check the onion RPC itself; set the
+   two variables first, curl asks for the password:
+
+   ```sh
+   ONION=abc…xyz.onion; RPCUSER=nodetracker
+   curl -s --socks5-hostname 127.0.0.1:9050 -u "$RPCUSER" --data-binary '{"jsonrpc":"1.0","id":"t","method":"getblockchaininfo","params":[]}' -H 'Content-Type: application/json' "http://$ONION:8332/" | head -c 300
+   ```
+
+3. **Config:** write the onion address out in full (YAML does not expand
+   `$ONION`), use `username` + `password_file` instead of `cookie_file`,
+   and allow plain http: Tor encrypts the traffic itself. Tor round trips
+   can take several seconds, so raise `timeout`:
+
+   ```yaml
+   interval: 30s
+   timeout: 25s            # must be <= interval
+   targets:
+     - name: my-node
+       node:
+         kind: bitcoind
+         url: http://abc…xyz.onion:8332
+         allow_insecure: true
+         username: nodetracker
+         password_file: ~/.config/node-tracker/node-rpc-password   # chmod 600
+       references:
+         - kind: esplora
+           url: https://mempool.space/api
+         - kind: esplora
+           url: https://blockstream.info/api
+       alert:
+         threshold: 3
+       notify: [telegram]
+   ```
+
+4. **Proxy:** node-tracker uses the standard `HTTP_PROXY` / `HTTPS_PROXY`
+   / `NO_PROXY` variables, and `socks5://` works. Hostnames are resolved by
+   the proxy, so `.onion` works. Set only `HTTP_PROXY`: the onion URL is
+   `http://` and goes through Tor, while the `https://` references and
+   Telegram stay direct.
+
+   ```sh
+   HTTP_PROXY=socks5://127.0.0.1:9050 node-tracker check
+   ```
+
+   With systemd, every service that talks to the node needs the proxy: the
+   daemon, and `node-tracker-once` / `node-tracker-report` if you use the
+   timers. User services:
+
+   ```sh
+   for u in node-tracker node-tracker-once node-tracker-report; do mkdir -p ~/.config/systemd/user/$u.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' > ~/.config/systemd/user/$u.service.d/tor.conf; done && systemctl --user daemon-reload && systemctl --user try-restart node-tracker
+   ```
+
+   System services:
+
+   ```sh
+   for u in node-tracker node-tracker-once node-tracker-report; do sudo mkdir -p /etc/systemd/system/$u.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' | sudo tee /etc/systemd/system/$u.service.d/tor.conf >/dev/null; done && sudo systemctl daemon-reload && sudo systemctl try-restart node-tracker
+   ```
+
+If Tor on the monitoring host stops, the node shows as `NODE_DOWN`: it
+can't be watched then, so that is the right alert.
+
+For the opposite case, a local node reached directly and the references and
+Telegram through Tor, see
+[Proxies and Tor](configuration.md#proxies-and-tor).
+
 ## Status reports
 
 `node-tracker report` sends a summary of every target to every notifier,
