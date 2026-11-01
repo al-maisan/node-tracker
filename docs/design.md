@@ -254,7 +254,7 @@ A test fails if a kind the config accepts has no constructor.
 ### Package layout
 
 ```
-cmd/node-tracker/            subcommands, flags, exit codes, signals
+cmd/node-tracker/            subcommands, flags, exit codes, signals; the setup wizard
 internal/config/             YAML schema, defaults, XDG paths, validation, secrets
 internal/app/                kind → implementation wiring
 internal/health/             pure logic: classify a sample, debounce (no I/O)
@@ -267,6 +267,8 @@ internal/notify/             Message, Event, rendering, retry/backoff
 internal/notify/telegram/    Bot API
 internal/httpx/              hardened HTTP client, body limits, URL redaction
 internal/service/            install-service: render, write and enable the units
+internal/fsx/                atomic file writes (install-service, setup)
+internal/term/               terminal echo off for secrets (termios ioctls, stdlib only)
 deploy/                      the units (embedded by deploy.go, so install-service writes the shipped ones), cron example
 examples/  docs/
 ```
@@ -329,6 +331,19 @@ are set are used as they are.
     without a shell. The unit gets only validated paths, and never a
     secret. For `-system` only root may be able to change the binary and
     the directories above it, since the service can read the secrets.
+- **setup** reads secrets with the terminal echo off and refuses to run
+  without a terminal (unless `-non-interactive`, with the secrets from
+  files), so a secret is never piped in by mistake. It never prints a
+  secret: the bot token shows as its last 4 characters. Secrets go to
+  `0600` files (`0640` group `node-tracker` as root), written atomically
+  through a new `O_EXCL` temporary file; existing files are replaced only
+  after a confirmation and kept as `.bak`. Every answer goes through the
+  config validation, and the whole config through `config.Load` before it
+  is written. The chat id comes from a `/start` link with a random 16-byte
+  code, matched exactly, so stale updates and other users can't inject a
+  chat. Text from the network (chat titles, errors) is stripped of control
+  characters before it is printed. The `rpcauth=` line is made in Go, as
+  Bitcoin Core's `rpcauth.py` does. No shell is run.
 - **State file** is created `0600` in a `0700` directory. It holds heights
   and states only, never secrets.
 
@@ -343,6 +358,7 @@ are set are used as they are.
 | `node-tracker check` | dry run: validate the config, sample every target, print a table and a verdict on the setup. Does not touch state and sends no alerts |
 | `node-tracker report` | send a status report of every target to every notifier, whatever the state. Not queued: a report is worthless if late |
 | `node-tracker test-notify [name]` | send a test message through one notifier, or all of them. Useful during setup |
+| `node-tracker setup` | interactive wizard: finds or asks for the node, the references, the alert preset and the Telegram bot, tests each answer, writes the config and its secrets, runs `check` and offers `install-service`. `-non-interactive` takes the answers from flags |
 | `node-tracker install-service -user\|-system` | write the shipped unit with `ExecStart=` set to the running binary and enable it; `-system` also creates the user and installs the config and secrets (see operations.md) |
 | `node-tracker version` | version, short git commit, build time (from `make build` ldflags), Go version; without ldflags the build info Go embeds fills in what it can, e.g. `node-tracker v1.0.0 (go install, go1.26.10)`, and missing parts are left out |
 
@@ -414,6 +430,13 @@ because a person reads them.
 - **State file:** atomic write, a corrupt file causes a hard error, lock
   conflicts give exit code 3, failed deliveries stay in the outbox and are
   redelivered, the outbox cap is enforced.
+- **setup:** the whole interview runs against a fake terminal that answers
+  each prompt once it is printed and checks that secrets are read with the
+  echo off, with fake bitcoind, Esplora, SOCKS and Telegram (`getMe`,
+  `getUpdates`, `sendMessage`) servers: detection, Tor, the `rpcauth=`
+  line (and a Bitcoin Core test vector), the `/start` matching, webhook
+  conflicts, file modes, `.bak`, `-non-interactive`, the refusal without a
+  terminal and Ctrl-C.
 - **CLI end to end:** `run()` against fake bitcoind, Esplora and Telegram
   servers: crossing up and down over several `once` runs, `check`,
   `report`, `test-notify`, lock conflicts, usage errors.

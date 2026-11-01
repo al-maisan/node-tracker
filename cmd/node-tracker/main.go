@@ -48,6 +48,7 @@ const (
 const usage = `Usage: node-tracker <command> [flags]
 
 Commands:
+  setup            interactive wizard: write, test and install the config
   run              run as a daemon, one tick every interval
   once             run one tick and exit (for cron or a systemd timer)
   check            dry run: sample all targets, print a table and a verdict; no state, no alerts
@@ -88,6 +89,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	case "install-service":
 		return installService(ctx, args, stdout, stderr)
+	case "setup":
+		return setupCmd(ctx, args, stdout, stderr)
 	case "run", "once", "check", "report", "test-notify":
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)

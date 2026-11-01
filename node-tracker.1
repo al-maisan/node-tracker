@@ -24,6 +24,17 @@ Secrets (RPC password, bot token) are read from files or environment
 variables, never from the configuration file.
 .SH COMMANDS
 .TP
+.B setup
+Interactive wizard for a first setup: finds the local bitcoind or asks for
+the node, the references, the alert preset and the Telegram bot, tests
+each answer, writes the configuration and its secret files, runs
+.B check
+and offers
+.BR install\-service ;
+see
+.B SETUP OPTIONS
+below.
+.TP
 .B run
 Run as a daemon: one tick right away, then one every
 .BR interval .
@@ -104,6 +115,121 @@ Logs go to standard error.
 .B warn
 or
 .BR error .
+.SH SETUP OPTIONS
+Without
+.BR \-non\-interactive ,
+.B setup
+asks its questions on the terminal; it refuses to run if standard input is
+not a terminal.
+Secrets are read with the echo off and never printed.
+As a user, it writes
+.I ~/.config/node\-tracker/config.yaml
+(or the
+.B \-config
+file) with
+.I telegram\-token
+and, for an RPC user,
+.IR <name>\-rpc\-password
+next to it, all mode 0600; as root,
+.I /etc/node\-tracker
+(mode 0750, files 0640, group
+.BR node\-tracker ),
+as
+.B install\-service \-system
+expects.
+A file that exists and differs is replaced only after a confirmation (or
+with
+.BR \-force ),
+and kept as
+.IR .bak .
+.PP
+For a node elsewhere it can generate the RPC password and print the
+.B rpcauth=
+line for the node's
+.IR bitcoin.conf .
+The chat id is found from a
+.B /start
+link with a one\-time code that the user opens in Telegram.
+.PP
+The other flags are the answers of
+.BR \-non\-interactive ,
+for scripts and containers:
+.TP
+.B \-non\-interactive
+Ask nothing: take the answers from the flags.
+The node and the references are tested, and a test message is sent, but
+only a token that Telegram rejects stops it.
+.TP
+.BI \-name " name"
+Target name in alerts.
+Default: the host name for a local node, else
+.BR node .
+.TP
+.BI \-node\-url " url"
+bitcoind RPC URL.
+Default: the detected local bitcoind, with its cookie.
+.TP
+.BI \-cookie\-file " file"
+bitcoind's
+.IR .cookie .
+.TP
+.BI \-rpc\-user " user"
+RPC username, instead of the cookie; needs
+.BR \-rpc\-password\-file .
+.TP
+.BI \-rpc\-password\-file " file"
+File holding the password of
+.BR \-rpc\-user ;
+it is copied next to the configuration.
+.TP
+.BI \-proxy " url"
+Proxy for the node, e.g.
+.BR socks5://127.0.0.1:9150 .
+Default: from the environment; for .onion,
+.BR socks5://127.0.0.1:9050 .
+It is written to the configuration unless it is that default, as the
+service may not have this shell's proxy variables.
+.TP
+.B \-allow\-insecure
+Allow plain http to a node that is neither loopback nor .onion, e.g. on a
+trusted LAN.
+.TP
+.BI \-references " urls"
+Esplora API URLs, comma\-separated, or
+.BR none .
+Default: the public ones of the node's chain.
+.TP
+.BI \-preset " preset"
+Alert preset:
+.BR fast ,
+.B balanced
+(default) or
+.BR quiet .
+.TP
+.BI \-token\-file " file"
+File holding the Telegram bot token (required); it is copied next to the
+configuration.
+.TP
+.BI \-chat\-id " id"
+Telegram chat id or
+.BI @ channel
+(required).
+.TP
+.B \-install\-service
+Run
+.B install\-service
+at the end:
+.B \-user
+as a user,
+.B \-system
+as root.
+On macOS, use
+.B brew services start node\-tracker
+instead.
+.TP
+.B \-force
+Replace files that exist and differ, keeping the old ones as
+.IR .bak .
 .SH INSTALL\-SERVICE OPTIONS
 Exactly one of
 .B \-user
@@ -212,6 +338,23 @@ and
 A tick interrupted while sampling leaves the state unchanged; alerts not
 yet delivered stay queued in the state file.
 .SH EXAMPLES
+Set up, interactively:
+.PP
+.RS
+.EX
+node\-tracker setup
+sudo node\-tracker setup    # the system service
+.EE
+.RE
+.PP
+Set up from a script:
+.PP
+.RS
+.EX
+node\-tracker setup \-non\-interactive \-token\-file token \-chat\-id 123456789 \-install\-service
+.EE
+.RE
+.PP
 Check that every node, reference and notifier is reachable:
 .PP
 .RS

@@ -122,3 +122,39 @@ func TestCheckToken(t *testing.T) {
 		t.Fatalf("unreachable: err = %v", err)
 	}
 }
+
+func TestUpdates(t *testing.T) {
+	var query string
+	status, body := 200, `{"ok":true,"result":[{"update_id":7,"message":{"text":"/start abc","chat":{"id":42,"type":"private","username":"me"}}},{"update_id":8,"my_chat_member":{}}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot"+token+"/getUpdates" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		query = r.URL.RawQuery
+		w.WriteHeader(status)
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	bot := New("tg", srv.URL, token, "", httpx.NewClient())
+
+	us, err := bot.Updates(context.Background(), 7, 30*time.Second)
+	if err != nil || query != "offset=7&timeout=30" || len(us) != 2 ||
+		us[0] != (Update{ID: 7, Text: "/start abc", Chat: Chat{ID: 42, Type: "private", Username: "me"}}) || us[1] != (Update{ID: 8}) {
+		t.Fatalf("Updates = %+v, %v (query %q)", us, err, query)
+	}
+	for _, tc := range []struct {
+		status int
+		body   string
+		want   error
+	}{
+		{409, `{"ok":false,"description":"Conflict: can't use getUpdates method while webhook is active"}`, ErrConflict},
+		{401, `{"ok":false}`, ErrBadToken},
+		{200, `junk`, nil},
+	} {
+		status, body = tc.status, tc.body
+		_, err := bot.Updates(context.Background(), 0, 0)
+		if err == nil || tc.want != nil && !errors.Is(err, tc.want) || strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("HTTP %d: err = %v, want %v", tc.status, err, tc.want)
+		}
+	}
+}

@@ -1,6 +1,9 @@
 # Configuration reference
 
-node-tracker reads one YAML file:
+node-tracker reads one YAML file. `node-tracker setup` writes it for you,
+with its secret files next to it (see the
+[Quick start](../README.md#quick-start)); this page explains every key.
+The file is read from:
 
 1. the path given with `-config`, or
 2. `$XDG_CONFIG_HOME/node-tracker/config.yaml`, which defaults to
@@ -214,7 +217,7 @@ Set exactly one of `cookie_file` or `username`.
 one method. In `bitcoin.conf`:
 
 ```ini
-rpcauth=tracker:<salt>$<hash>        # from share/rpcauth/rpcauth.py
+rpcauth=tracker:<salt>$<hash>        # from node-tracker setup, or share/rpcauth/rpcauth.py
 rpcwhitelist=tracker:getblockchaininfo
 rpcwhitelistdefault=0                # else users without a whitelist are denied
 ```

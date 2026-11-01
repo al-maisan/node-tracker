@@ -497,7 +497,7 @@ func TestNoConfigAndMissingCookie(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
-	want := "node-tracker: no config at " + filepath.Join(home, ".config", "node-tracker", "config.yaml") + "; copy examples/config.yaml"
+	want := "node-tracker: no config at " + filepath.Join(home, ".config", "node-tracker", "config.yaml") + "; run 'node-tracker setup'"
 	if code, _, errs := exec(t, "check"); code != exitUsage || !strings.HasPrefix(errs, want) {
 		t.Fatalf("code=%d stderr=%q, want %q…", code, errs, want)
 	}

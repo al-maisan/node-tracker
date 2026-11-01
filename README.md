@@ -135,30 +135,26 @@ The easiest way first:
 
 1. **Install** node-tracker; see [Install](#install).
 
-2. **Create a Telegram bot** and find your chat id. This takes about two
-   minutes; see [docs/telegram.md](docs/telegram.md). Save the token:
+2. **Run the setup wizard:**
 
    ```sh
-   mkdir -p ~/.config/node-tracker && install -m 600 /dev/null ~/.config/node-tracker/telegram-token && $EDITOR ~/.config/node-tracker/telegram-token
+   node-tracker setup          # or: sudo node-tracker setup, for the system service
    ```
 
-3. **Configure.** Copy [examples/config.yaml](examples/config.yaml) to
-   `~/.config/node-tracker/config.yaml`, then set your node's URL,
-   `cookie_file` and `chat_id`. For a local bitcoind, the
-   [minimal config](docs/configuration.md#minimal-config) is 8 lines.
+   It finds your local bitcoind (or asks for your node's URL, `.onion`
+   included, and makes the `rpcauth=` line for its `bitcoin.conf`), asks
+   for the token of a Telegram bot you create with @BotFather, and shows a
+   link: tap it, press Start, and the chat is found. Each answer is tested
+   right away. Then it sends a test message, writes the config, runs
+   `check` and offers to install and start the service. Nothing is written
+   before the end.
 
-4. **Check** that everything is reachable:
+3. **Done.** With the default preset, you get a message when the node is
+   more than 3 blocks behind for two checks in a row, and another when it
+   is back. `node-tracker check` shows the current state at any time.
 
-   ```sh
-   node-tracker check          # samples every target, prints a table, sends nothing
-   node-tracker test-notify    # sends a test message to Telegram
-   ```
-
-5. **Run it**, in one of these ways:
-
-   ```sh
-   node-tracker run            # in the foreground; or as a service, see below
-   ```
+To set it up by hand, or from a script (`node-tracker setup
+-non-interactive`), see [docs/manual-setup.md](docs/manual-setup.md).
 
 ## Ways to run
 
@@ -180,6 +176,7 @@ walks through each setup.
 
 | Command | What it does |
 |---|---|
+| `setup` | interactive wizard: writes, tests and installs the config (`-non-interactive` for scripts) |
 | `run` | daemon: one tick every `interval` |
 | `once` | one tick, then exit |
 | `check` | dry run: print a status table and a verdict on the setup; touches no state, sends no alerts |
@@ -222,6 +219,7 @@ tick:  lock state ─▶ sample node + references in parallel ─▶ classify �
 
 ## Documentation
 
+- [Setting up by hand, or from a script](docs/manual-setup.md)
 - [Configuration reference](docs/configuration.md)
 - [Telegram setup](docs/telegram.md)
 - [Operations: deployment, logs, state, Tor, troubleshooting](docs/operations.md)

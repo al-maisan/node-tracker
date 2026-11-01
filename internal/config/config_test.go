@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 const secret = "123456:TOP-SECRET"
@@ -595,5 +597,53 @@ func TestExampleConfig(t *testing.T) {
 	}
 	if c.Notifiers[0].BotToken != secret {
 		t.Fatal("token not resolved")
+	}
+}
+
+// CheckEndpoint validates and defaults one endpoint as Load does, with the
+// password as given.
+func TestCheckEndpoint(t *testing.T) {
+	e, _, err := CheckEndpoint(Endpoint{Kind: KindBitcoind, URL: "http://" + onion + ":8332", Username: "u", Password: "pw"}, "node", NodeKinds)
+	if err != nil || e.Proxy != DefaultTorProxy || !e.DefaultProxy || e.Timeout != onionTimeout || e.Name != "bitcoind:"+onion+":8332" || e.Password != "pw" {
+		t.Fatalf("onion: %+v, %v", e, err)
+	}
+	for _, tc := range []struct {
+		e    Endpoint
+		want string
+	}{
+		{Endpoint{Kind: KindBitcoind, URL: "http://10.0.0.2:8332", Username: "u", Password: "pw"}, `node.url "http://10.0.0.2:8332": plain http is only allowed`},
+		{Endpoint{Kind: KindBitcoind, URL: "http://127.0.0.1:8332", Username: "u"}, "node.password: required"},
+		{Endpoint{Kind: KindBitcoind, URL: "127.0.0.1:8332", CookieFile: "/c"}, "missing scheme"},
+		{Endpoint{Kind: KindEsplora, URL: "https://x", Username: "u"}, "esplora takes no auth fields"},
+	} {
+		if _, _, err := CheckEndpoint(tc.e, "node", ReferenceKinds); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%+v: err = %v, want %q", tc.e, err, tc.want)
+		}
+	}
+	if CheckName("my-node") != nil || CheckName("a b") == nil || CheckChatID("-100123") != nil || CheckChatID("@ab") == nil ||
+		CheckBotToken("1:abc") != nil || CheckBotToken("1:a/b") == nil {
+		t.Error("CheckName / CheckChatID / CheckBotToken")
+	}
+}
+
+// A marshalled Config loads back as it was: empty fields are left out, an
+// empty references list stays.
+func TestMarshalRoundTrip(t *testing.T) {
+	zero, three := uint64(0), uint64(3)
+	in := Config{
+		Targets: []Target{{Name: "n", Node: Endpoint{Kind: KindBitcoind, URL: "http://127.0.0.1:8332", CookieFile: "COOKIEFILE"},
+			References: []Endpoint{}, Alert: Alert{Threshold: &three, RecoverThreshold: &zero, For: 2}}},
+		Notifiers: []Notifier{{Name: "tg", Kind: KindTelegram, BotTokenFile: "TOKENFILE", ChatID: "42"}},
+	}
+	b, err := yaml.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(b); strings.Contains(s, "username") || strings.Contains(s, "interval") || !strings.Contains(s, "references: []") || !strings.Contains(s, "recover_threshold: 0") {
+		t.Fatalf("marshalled:\n%s", s)
+	}
+	c, _, err := Load(write(t, string(b)))
+	if err != nil || len(c.Targets[0].References) != 0 || *c.Targets[0].Alert.RecoverThreshold != 0 || c.Targets[0].Notify[0] != "tg" {
+		t.Fatalf("load: %+v, %v", c, err)
 	}
 }

@@ -3,6 +3,7 @@
 #
 # Default location: ~/.config/node-tracker/config.yaml
 # Check it with:    node-tracker check
+# Or let `node-tracker setup` write one for you.
 #
 # Only a target's name and a notifier are required. For a bitcoind on this
 # machine, node, references, alert and notify can be left out: see
