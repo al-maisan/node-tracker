@@ -1,0 +1,185 @@
+.\" The .TH version and date are placeholders, filled in by the packaging
+.\" (scripts/dist.sh, ppa/debian/rules) from the release tag and its commit date.
+.TH NODE\-TRACKER 1 "@DATE@" "node-tracker @VERSION@" "User Commands"
+.SH NAME
+node\-tracker \- alert when a Bitcoin node falls behind the chain tip
+.SH SYNOPSIS
+.B node\-tracker
+.I command
+.RI [ flags ]
+.SH DESCRIPTION
+.B node\-tracker
+compares a Bitcoin node's block height with independent views of the chain
+tip (Esplora servers such as \%mempool.space and \%blockstream.info, or other
+bitcoind nodes) and with the node's own header height.
+When the node falls more than a threshold behind, cannot be reached, or no
+reference answers, it sends a Telegram message, and another one when the
+node is back in sync.
+Changes are debounced, and undelivered alerts are kept and retried.
+.PP
+Only the read\-only
+.B getblockchaininfo
+RPC is called.
+Secrets (RPC password, bot token) are read from files or environment
+variables, never from the configuration file.
+.SH COMMANDS
+.TP
+.B run
+Run as a daemon: one tick right away, then one every
+.BR interval .
+State and pending alerts are saved after each tick.
+.TP
+.B once
+Run one tick and exit; for cron or a systemd timer.
+Uses the same state file as
+.BR run .
+.TP
+.B check
+Dry run: sample every target and print a table.
+No state is read or written and no alert is sent.
+.TP
+.B report
+Send a status report of every target to every notifier, whatever the state.
+.TP
+.BR test\-notify " [\fIname\fR]"
+Send a test message to the notifier
+.IR name ,
+or to all notifiers.
+.TP
+.B version
+Print the version, commit, build time and Go version.
+.TP
+.B help
+Print a short usage message.
+.SH OPTIONS
+Flags follow the command, e.g.
+.BR "node\-tracker once \-log\-level debug" .
+.B node\-tracker
+.I command
+.B \-h
+lists the flags of a command.
+.TP
+.BI \-config " file"
+Configuration file.
+Default:
+.IR $XDG_CONFIG_HOME/node\-tracker/config.yaml ,
+that is
+.I ~/.config/node\-tracker/config.yaml
+unless
+.B XDG_CONFIG_HOME
+is set.
+.TP
+.BI \-state " file"
+State file, for
+.B run
+and
+.B once
+only.
+Default: the configuration's
+.BR state_file ,
+else
+.IR $XDG_STATE_HOME/node\-tracker/state.json ,
+that is
+.IR ~/.local/state/node\-tracker/state.json .
+.TP
+.BI \-log\-format " format"
+.B text
+(default) or
+.BR json .
+Logs go to standard error.
+.TP
+.BI \-log\-level " level"
+.BR debug ,
+.B info
+(default),
+.B warn
+or
+.BR error .
+.SH EXIT STATUS
+.TP
+.B 0
+Success; every target is in sync.
+.TP
+.B 1
+Failure, e.g. the state file could not be read or written, an alert is
+still undelivered after
+.BR once ,
+or the run was interrupted.
+.TP
+.B 2
+Usage or configuration error.
+.TP
+.B 3
+Another node\-tracker holds the lock on the state file
+.RB ( run
+or
+.BR once );
+this run did nothing.
+.TP
+.B 4
+A target was observed out of sync
+.RB ( once ,
+.BR check ,
+.BR report ).
+This is the monitored state, not a failure: alerts follow the debounced
+state.
+.SH ENVIRONMENT
+.TP
+.BR HTTP_PROXY ", " HTTPS_PROXY ", " NO_PROXY
+Proxies for HTTP requests;
+.B socks5://
+works, e.g. for Tor.
+See the configuration reference for per\-endpoint proxies and .onion nodes.
+.TP
+.BR XDG_CONFIG_HOME ", " XDG_STATE_HOME
+Base directories of the default configuration and state files.
+.SH FILES
+.TP
+.I ~/.config/node\-tracker/config.yaml
+Default configuration file.
+.TP
+.I ~/.local/state/node\-tracker/state.json
+Default state file: target states and undelivered alerts.
+It is locked through
+.IR state.json.lock .
+.TP
+.IR /etc/node\-tracker/config.yaml ", " /var/lib/node\-tracker/state.json
+Configuration and state of the systemd system service.
+.SH SIGNALS
+.B SIGINT
+and
+.B SIGTERM
+stop
+.B run
+and
+.BR once .
+A tick interrupted while sampling leaves the state unchanged; alerts not
+yet delivered stay queued in the state file.
+.SH EXAMPLES
+Check that every node, reference and notifier is reachable:
+.PP
+.RS
+.EX
+node\-tracker check
+node\-tracker test\-notify
+.EE
+.RE
+.PP
+Run one tick every minute from cron:
+.PP
+.RS
+.EX
+* * * * *  node\-tracker once 2>&1 | logger \-t node\-tracker
+.EE
+.RE
+.SH SEE ALSO
+The configuration reference, operations guide and design notes in
+.IR /usr/share/doc/node\-tracker/docs/ ,
+or at
+.UR https://github.com/al\-maisan/node\-tracker
+.UE .
+.SH BUGS
+Report bugs at
+.UR https://github.com/al\-maisan/node\-tracker/issues
+.UE ;
+security problems privately, see SECURITY.md.

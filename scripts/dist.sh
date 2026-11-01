@@ -16,6 +16,7 @@ export CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOFLAGS= GOEXPERIMENT=
 # No Windows: the state lock uses flock.
 targets=(linux/amd64 linux/arm64 linux/armv7 darwin/amd64 darwin/arm64)
 mtime=$(git log -1 --format=%ct)
+man_date=$(date -u -d "@$mtime" +%Y-%m-%d)
 
 rm -rf dist
 mkdir dist
@@ -30,6 +31,11 @@ for t in "${targets[@]}"; do
 		go build -trimpath -ldflags "$LDFLAGS" -o "$stage/node-tracker" ./cmd/node-tracker
 	cp -R README.md LICENSE assets deploy docs "$stage/"
 	cp examples/config.yaml "$stage/examples/"
+	sed -e "s/@VERSION@/${VERSION#v}/g" -e "s/@DATE@/$man_date/g" node-tracker.1 >"$stage/node-tracker.1"
+	if grep -n '@[A-Z]*@' "$stage/node-tracker.1" >&2; then
+		echo "dist: placeholder left in node-tracker.1" >&2
+		exit 1
+	fi
 	tar --sort=name --owner=0 --group=0 --numeric-owner --mode=go-w,a+rX \
 		--mtime="@$mtime" -C dist -cf - "$name" | gzip -9n >"$stage.tar.gz"
 	rm -rf "$stage"

@@ -80,7 +80,8 @@ delivers this:
    The `grep` only passes for a good signature from the release key
    `753B 6ECF 2B45 8FF3 D19D 568C 1E0A 2883 97AE 739E`. On macOS use
    `shasum -a 256 --ignore-missing -c SHA256SUMS`. The archive holds the
-   binary, this README, the docs, the systemd units and an example config.
+   binary, its man page (`node-tracker.1`), this README, the docs, the systemd
+   units and an example config.
 
    Or, with Homebrew (macOS, Linux amd64/arm64):
 
@@ -89,7 +90,8 @@ delivers this:
    ```
 
    The docs are then in `$(brew --prefix)/share/doc/node-tracker`, the
-   systemd units and example config in `$(brew --prefix)/share/node-tracker`.
+   systemd units and example config in `$(brew --prefix)/share/node-tracker`,
+   and `man node-tracker` works.
 
    Or, on Ubuntu 26.04 (amd64, arm64):
 
@@ -97,9 +99,9 @@ delivers this:
    sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker
    ```
 
-   The package installs `/usr/bin/node-tracker`, the systemd units (none
-   is enabled) and a `node-tracker` system user. The docs and example
-   config are in `/usr/share/doc/node-tracker`; see
+   The package installs `/usr/bin/node-tracker` with its man page, the
+   systemd units (none is enabled) and a `node-tracker` system user. The
+   docs and example config are in `/usr/share/doc/node-tracker`; see
    [docs/operations.md](docs/operations.md#from-a-package) for the setup.
 
    Or, with Go 1.26+:

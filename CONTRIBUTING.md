@@ -25,6 +25,10 @@ make test-ppa     # tests of the packaging scripts
 CI runs `lint`, `test`, `test-ppa`, `vuln` and `dist`, and checks the
 Homebrew formula syntax, on every pull request.
 
+A new command or flag also goes into the man page, `node-tracker.1`;
+`make test` fails until it does. Check the rendering with
+`man -l node-tracker.1`.
+
 ## Releasing
 
 1. On an up-to-date `main`, tag the release commit with a signed tag and
