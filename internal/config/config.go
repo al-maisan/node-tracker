@@ -546,9 +546,14 @@ func isLoopback(host string) bool {
 
 func base(p string) string { return p[strings.LastIndex(p, ".")+1:] }
 
-// DefaultConfigPath is $XDG_CONFIG_HOME/node-tracker/config.yaml.
+// DefaultConfigDir is $XDG_CONFIG_HOME, falling back to ~/.config, on every
+// OS. os.UserConfigDir is not used: on macOS it is ~/Library/Application
+// Support, which the docs don't mention.
+func DefaultConfigDir() (string, error) { return xdgDir("XDG_CONFIG_HOME", ".config") }
+
+// DefaultConfigPath is node-tracker/config.yaml in DefaultConfigDir.
 func DefaultConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := DefaultConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -558,12 +563,22 @@ func DefaultConfigPath() (string, error) {
 // DefaultStatePath is $XDG_STATE_HOME/node-tracker/state.json, falling back
 // to ~/.local/state/node-tracker/state.json.
 func DefaultStatePath() (string, error) {
-	if dir := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(dir) {
-		return filepath.Join(dir, "node-tracker", "state.json"), nil
+	dir, err := xdgDir("XDG_STATE_HOME", filepath.Join(".local", "state"))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "node-tracker", "state.json"), nil
+}
+
+// xdgDir is the XDG base directory in env, or ~/fallback if env is unset or
+// not absolute (the spec says to ignore relative paths).
+func xdgDir(env, fallback string) (string, error) {
+	if dir := os.Getenv(env); filepath.IsAbs(dir) {
+		return dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "state", "node-tracker", "state.json"), nil
+	return filepath.Join(home, fallback), nil
 }

@@ -93,7 +93,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var o options
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&o.config, "config", "", "config file (default $XDG_CONFIG_HOME/node-tracker/config.yaml)")
+	fs.StringVar(&o.config, "config", "", "config file (default $XDG_CONFIG_HOME/node-tracker/config.yaml, else ~/.config/node-tracker/config.yaml)")
 	if cmd == "run" || cmd == "once" {
 		fs.StringVar(&o.state, "state", "", "state file (default: state_file from config, else $XDG_STATE_HOME/node-tracker/state.json)")
 	}

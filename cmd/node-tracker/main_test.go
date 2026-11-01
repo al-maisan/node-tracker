@@ -453,3 +453,28 @@ func TestInstallServiceDryRun(t *testing.T) {
 		}
 	}
 }
+
+// Without -config and XDG_CONFIG_HOME, the config is ~/.config/node-tracker/
+// config.yaml on every OS (not ~/Library/Application Support on macOS), and
+// the user unit goes to ~/.config/systemd/user.
+func TestDefaultConfigPath(t *testing.T) {
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	cfg, _ := w.config(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	dst := filepath.Join(home, ".config", "node-tracker", "config.yaml")
+	os.MkdirAll(filepath.Dir(dst), 0o700)
+	if err := os.Rename(cfg, dst); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs := exec(t, "check"); code != exitOK || !strings.Contains(out, "btc     OK     938266") {
+		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	}
+	code, out, errs := exec(t, "install-service", "-user", "-dry-run")
+	if want := "would write " + filepath.Join(home, ".config", "systemd", "user", "node-tracker.service") + " "; code != exitOK || !strings.Contains(out, want) {
+		t.Fatalf("install-service: code=%d, no %q in\n%s%s", code, want, out, errs)
+	}
+}
