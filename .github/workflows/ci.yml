@@ -23,5 +23,7 @@ jobs:
       - run: make test
       - run: make vuln
       - run: make build && ./bin/node-tracker version
-      - run: make dist
+      # A tag-like version, as brew-formula.sh needs one.
+      - run: make dist VERSION=v0.0.0
       - run: cd dist && sha256sum -c SHA256SUMS && tar -xzf node-tracker_*_linux_amd64.tar.gz && ./node-tracker_*_linux_amd64/node-tracker version
+      - run: scripts/brew-formula.sh v0.0.0 && ruby -c dist/node-tracker.rb

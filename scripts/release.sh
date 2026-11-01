@@ -51,9 +51,19 @@ make dist VERSION="$tag" BUILD_TIME="$(TZ=UTC git log -1 --format=%cd --date=for
 gpg --local-user "$release_key" --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
 gpg --status-fd 1 --verify dist/SHA256SUMS.asc dist/SHA256SUMS 2>/dev/null | signed_by_release_key ||
 	die "SHA256SUMS.asc does not verify with $release_key"
+# Homebrew gets stable releases only. Written before publishing, so a
+# failure stops the release.
+if [[ $tag != *-* ]]; then scripts/brew-formula.sh "$tag" "$repo"; fi
 
 pre=()
 if [[ $tag == *-* ]]; then pre=(--prerelease); fi
 gh release create "$tag" --repo "$repo" --verify-tag --title "$tag" --generate-notes "${pre[@]}" \
 	--notes "Built with $(go env GOVERSION). Verify: see README, Quick start." \
 	dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.asc
+
+if [[ $tag != *-* ]]; then
+	tap=${repo%%/*}/homebrew-tap
+	echo "release: publish the formula to $tap:"
+	printf 'd=$(mktemp -d) && git clone https://github.com/%s.git "$d" && mkdir -p "$d/Formula" && cp %q "$d/Formula/" && git -C "$d" add Formula/node-tracker.rb && git -C "$d" commit -m "node-tracker %s" && git -C "$d" push\n' \
+		"$tap" "$PWD/dist/node-tracker.rb" "$tag"
+fi

@@ -395,4 +395,6 @@ because a person reads them.
 - Windows support (the state lock uses `flock`)
 
 Release archives and signed checksums: `make dist` / `make release`, see
-CONTRIBUTING.md. Other packaging (Homebrew, AUR) is tracked in issue #8.
+CONTRIBUTING.md. Homebrew: `brew install al-maisan/tap/node-tracker`, the
+formula is written by `make release`. Other packaging (AUR) is tracked in
+issue #8.
