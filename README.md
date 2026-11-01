@@ -178,4 +178,4 @@ Report security problems privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-[GPL-3.0](LICENSE)
+[GPL-3.0-only](LICENSE): GNU General Public License, version 3 only.
