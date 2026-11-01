@@ -25,16 +25,18 @@ CI runs `lint`, `test`, `vuln` and `dist` on every pull request.
 
 ## Releasing
 
-1. Tag the release commit with a signed tag and push it:
-   `git tag -s v1.2.3 -m v1.2.3 && git push origin v1.2.3`
-2. Run `make release`. It checks that the tree is clean and that the one
-   `v*` tag at HEAD is signed and pushed, builds `dist/`, signs
-   `SHA256SUMS` with your default gpg key and creates the GitHub release
-   with `gh`.
+1. On an up-to-date `main`, tag the release commit with a signed tag and
+   push it: `git tag -s v1.2.3 -m v1.2.3 && git push origin v1.2.3`
+2. Run `make release`. It stops unless the tree is clean, HEAD is on
+   `main` of `origin`, and the one `v*` tag at HEAD is signed by the
+   release key (`RELEASE_KEY`) and is the same tag object on GitHub. Then
+   it runs `lint`, `test` and `vuln`, builds `dist/`, signs `SHA256SUMS`
+   with the release key and creates the GitHub release with `gh`.
 
-Release builds use the commit time as build time, so the archives are
-reproducible: with the same Go toolchain (see `node-tracker version`),
-`git checkout v1.2.3 && make dist VERSION=v1.2.3 BUILD_TIME=<build time from node-tracker version>`
+Release builds use the official Go toolchain pinned in
+`scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and
+the commit time as build time, so the archives are reproducible:
+`git checkout v1.2.3 && GOTOOLCHAIN=<Go version from node-tracker version> make dist VERSION=v1.2.3 BUILD_TIME=<build time from node-tracker version>`
 gives the same `SHA256SUMS`.
 
 ## Guidelines

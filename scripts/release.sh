@@ -1,29 +1,59 @@
 #!/usr/bin/env bash
 # Publishes a GitHub release for the signed tag at HEAD. Run via 'make release'.
-# Signs dist/SHA256SUMS with your default gpg key.
+# Signs dist/SHA256SUMS with the release key.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+release_key=${RELEASE_KEY:-753B6ECF2B458FF3D19D568C1E0A288397AE739E}
+# Official toolchain, so anyone can rebuild the same archives. Bump with new
+# Go patch releases.
+export GOTOOLCHAIN=${RELEASE_GO:-go1.26.10}
 
 die() {
 	echo "release: $*" >&2
 	exit 1
 }
 
+# Reads gpg status lines on stdin; true if the release key (primary key or
+# subkey) made a valid signature.
+signed_by_release_key() {
+	awk -v k="$release_key" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && ($3 == k || $NF == k) { ok = 1 } END { exit !ok }'
+}
+
 [[ -z $(git status --porcelain) ]] || die "working tree not clean"
+
+url=$(git remote get-url origin)
+repo=${url%.git}
+repo=${repo#*github.com[:/]}
+[[ $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "origin '$url' is not a GitHub repo"
+remote=https://github.com/$repo.git
+
 mapfile -t tags < <(git tag --points-at HEAD 'v*')
 ((${#tags[@]} == 1)) || die "need exactly one v* tag at HEAD, found ${#tags[@]}: ${tags[*]}"
 tag=${tags[0]}
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "tag '$tag' is not vMAJOR.MINOR.PATCH[-PRE]"
-git tag --verify "$tag" >/dev/null 2>&1 || die "tag '$tag' is not signed or its signature does not verify"
-remote=$(git ls-remote origin "refs/tags/$tag^{}" | cut -f1)
-[[ $remote == "$(git rev-parse HEAD)" ]] || die "tag '$tag' is not pushed to origin or points to another commit there"
+git verify-tag --raw "$tag" 2>&1 | signed_by_release_key || die "tag '$tag' is not signed by $release_key"
 
+# The remote tag must be this very tag object, not just point to HEAD.
+refs=$(git ls-remote "$remote" "refs/tags/$tag" "refs/tags/$tag^{}")
+[[ $(awk -v r="refs/tags/$tag" '$2 == r { print $1 }' <<<"$refs") == "$(git rev-parse "refs/tags/$tag")" ]] ||
+	die "tag '$tag' on $repo is missing or is another tag object"
+[[ $(awk -v r="refs/tags/$tag^{}" '$2 == r { print $1 }' <<<"$refs") == "$(git rev-parse HEAD)" ]] ||
+	die "tag '$tag' on $repo points to another commit"
+
+main=$(git ls-remote "$remote" refs/heads/main | cut -f1)
+git cat-file -e "$main^{commit}" 2>/dev/null || die "main of $repo ($main) is not local; fetch it first"
+git merge-base --is-ancestor HEAD "$main" || die "HEAD is not on main of $repo"
+
+make lint test vuln
 # Commit time as build time: anyone can rebuild the same archives.
 make dist VERSION="$tag" BUILD_TIME="$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
-gpg --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
-gpg --verify dist/SHA256SUMS.asc dist/SHA256SUMS
+gpg --local-user "$release_key" --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
+gpg --status-fd 1 --verify dist/SHA256SUMS.asc dist/SHA256SUMS 2>/dev/null | signed_by_release_key ||
+	die "SHA256SUMS.asc does not verify with $release_key"
 
 pre=()
 if [[ $tag == *-* ]]; then pre=(--prerelease); fi
-gh release create "$tag" --verify-tag --title "$tag" --generate-notes "${pre[@]}" \
+gh release create "$tag" --repo "$repo" --verify-tag --title "$tag" --generate-notes "${pre[@]}" \
+	--notes "Built with $(go env GOVERSION). Verify: see README, Quick start." \
 	dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.asc

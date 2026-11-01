@@ -10,6 +10,9 @@ if [[ ! $VERSION =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
 	exit 1
 fi
 
+# Same output whatever the caller's environment says.
+export CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOFLAGS= GOEXPERIMENT=
+
 # No Windows: the state lock uses flock.
 targets=(linux/amd64 linux/arm64 linux/armv7 darwin/amd64 darwin/arm64)
 mtime=$(git log -1 --format=%ct)
@@ -23,7 +26,7 @@ for t in "${targets[@]}"; do
 	stage=dist/$name
 	mkdir -p "$stage/examples"
 	echo "dist: $name"
-	CGO_ENABLED=0 GOOS=$os GOARCH=$goarch GOARM=$goarm \
+	GOOS=$os GOARCH=$goarch GOARM=$goarm \
 		go build -trimpath -ldflags "$LDFLAGS" -o "$stage/node-tracker" ./cmd/node-tracker
 	cp -R README.md LICENSE deploy docs "$stage/"
 	cp examples/config.yaml "$stage/examples/"
