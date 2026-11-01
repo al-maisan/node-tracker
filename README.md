@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="node-tracker logo: a gauge showing how far the node is behind the chain tip, and the name node-tracker" width="389">
+    <img src="assets/logo.svg" alt="node-tracker logo: an NT shield above a chain of blocks, the last one hollow (a node behind the tip), and the name NODETRACKER" width="240">
   </picture>
 </p>
 
