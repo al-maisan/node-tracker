@@ -130,3 +130,13 @@ func TestNum(t *testing.T) {
 		}
 	}
 }
+
+func TestTag(t *testing.T) {
+	m := Message{Subject: "🔴 btc is lagging", Body: "b"}
+	if got := Tag("shb", m); got.Subject != "[shb] 🔴 btc is lagging" || got.Body != "b" {
+		t.Errorf("Tag = %+v", got)
+	}
+	if got := Tag("", m); got != m {
+		t.Errorf("Tag without a name = %+v", got)
+	}
+}

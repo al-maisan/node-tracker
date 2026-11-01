@@ -297,3 +297,23 @@ func TestLocalReferenceAloneIsNoIndependentView(t *testing.T) {
 		t.Fatalf("state = %s, alerts = %q", got, rec.got)
 	}
 }
+
+// The tracker's name is in front of alerts and of broadcast messages.
+func TestTrackerName(t *testing.T) {
+	var tick int
+	rec := &recorder{}
+	m := newMonitor(&tick, rec)
+	m.Tracker = "shb"
+	d := &state.Data{Targets: map[string]health.Target{}}
+	for tick = 0; tick < 3; tick++ { // lagging from tick 1, For 2
+		if _, _, err := m.Tick(context.Background(), d, time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Broadcast(context.Background(), notify.Message{Subject: "report"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"[shb] 🔴 btc is lagging", "[shb] report"}; !reflect.DeepEqual(rec.got, want) {
+		t.Fatalf("got %q, want %q", rec.got, want)
+	}
+}

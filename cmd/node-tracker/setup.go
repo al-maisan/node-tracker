@@ -112,6 +112,7 @@ type setupOptions struct {
 	proxy, references, preset, tokenFile, chatID, telegramProxy string
 	nonInteractive, allowInsecure, installService, force        bool
 	downFor                                                     int // 0: see answers.downFor
+	trackerName                                                 string
 }
 
 func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -127,6 +128,7 @@ func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	fs.StringVar(&o.config, "config", "", "config file to write (default $XDG_CONFIG_HOME/node-tracker/config.yaml; as root /etc/node-tracker/config.yaml); the secrets go next to it")
 	fs.BoolVar(&o.nonInteractive, "non-interactive", false, "ask nothing: take the answers from the other flags")
+	fs.StringVar(&o.trackerName, "tracker-name", "", "name of this tracker in front of every message, or none (default: the host name)")
 	fs.StringVar(&o.name, "name", "", "target name in alerts (default: the host name for a local node, else node)")
 	fs.StringVar(&o.nodeURL, "node-url", "", "bitcoind RPC URL (default: the detected local bitcoind)")
 	fs.StringVar(&o.cookieFile, "cookie-file", "", "bitcoind's .cookie (default for the detected node: its cookie)")
@@ -222,6 +224,7 @@ type answers struct {
 	chatTested bool   // the test message went through
 	tgProxy    string // of the notifier
 	downFor    int    // -down-for; 0: see nodeDownFor
+	tracker    string // config name: in front of every message; "" for none
 }
 
 func (w *wizard) run(ctx context.Context) (int, error) {
@@ -381,6 +384,16 @@ func (w *wizard) interview(ctx context.Context) (*answers, error) {
 	if n := a.nodeDownFor(); n != presets[a.preset].ticks {
 		fmt.Fprintf(w.out, "The node is reached over Tor, which stalls now and then: \"node unreachable\" is sent only after %d checks in a row (about %s; alert.down_for).\n",
 			n, time.Duration(n)*presets[a.preset].interval)
+	}
+	for {
+		l, err := w.ask(ctx, "Name of this tracker in front of every alert, to tell several trackers apart (none for no name)", cmp.Or(hostName(w.hostname), "none"))
+		if err != nil {
+			return nil, err
+		}
+		if a.tracker, err = trackerName(l); err == nil {
+			break
+		}
+		fmt.Fprintln(w.out, err)
 	}
 
 	fmt.Fprintln(w.out, "\n4. Telegram")
@@ -700,7 +713,7 @@ func (w *wizard) askTelegram(ctx context.Context, a *answers) error {
 			return err
 		}
 		fmt.Fprint(w.out, "Sending a test message … ")
-		if err := w.sendTest(ctx, a.token, id); err != nil {
+		if err := w.sendTest(ctx, a.token, id, a.tracker); err != nil {
 			fmt.Fprintf(w.out, "failed: %s\n", err)
 			continue
 		}
@@ -898,10 +911,10 @@ func chatName(c telegram.Chat) string {
 }
 
 // sendTest sends the test message of test-notify. Its errors say what to do.
-func (w *wizard) sendTest(ctx context.Context, tok config.Secret, chatID string) error {
+func (w *wizard) sendTest(ctx context.Context, tok config.Secret, chatID, tracker string) error {
 	cctx, cancel := context.WithTimeout(ctx, config.DefaultTimeout)
 	defer cancel()
-	err := w.bot(tok, chatID).Send(cctx, notify.Test(time.Now()))
+	err := w.bot(tok, chatID).Send(cctx, notify.Tag(tracker, notify.Test(time.Now())))
 	if err == nil {
 		return nil
 	}
@@ -972,6 +985,9 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 		fmt.Fprintf(w.out, "node %s: %s\n", a.node.URL, heightInfo(h))
 	}
 
+	if a.tracker, err = trackerName(cmp.Or(o.trackerName, hostName(w.hostname), "none")); err != nil {
+		return nil, fmt.Errorf("-tracker-name: %v", err)
+	}
 	a.name = cmp.Or(o.name, defaultName(isLoopback(a.node.URL), w.hostname))
 	if err := config.CheckName(a.name); err != nil {
 		return nil, fmt.Errorf("-name %q: %v", a.name, err)
@@ -1012,7 +1028,7 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 	default:
 		fmt.Fprintf(w.out, "bot: @%s (token …%s)\n", user, tail(a.token))
 	}
-	if err := w.sendTest(ctx, a.token, a.chatID); err != nil {
+	if err := w.sendTest(ctx, a.token, a.chatID, a.tracker); err != nil {
 		fmt.Fprintf(w.out, "warning: test message failed: %v\n", err)
 	} else {
 		fmt.Fprintln(w.out, "test message sent")
@@ -1198,7 +1214,7 @@ func (w *wizard) render(a *answers, tok, pw string) ([]byte, error) {
 	b.WriteString("# Written by node-tracker setup. Reference: docs/configuration.md\n")
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
-	err := enc.Encode(config.Config{Interval: p.interval, Targets: []config.Target{t}, Notifiers: []config.Notifier{n}})
+	err := enc.Encode(config.Config{Name: a.tracker, Interval: p.interval, Targets: []config.Target{t}, Notifiers: []config.Notifier{n}})
 	return b.Bytes(), err
 }
 
@@ -1280,14 +1296,31 @@ func heightInfo(h source.Height) string {
 
 // defaultName is this host's name for a local node, else "node".
 func defaultName(local bool, hostname func() (string, error)) string {
-	if local {
-		if h, err := hostname(); err == nil {
-			if h, _, _ = strings.Cut(h, "."); config.CheckName(h) == nil {
-				return h
-			}
-		}
+	if h := hostName(hostname); local && h != "" {
+		return h
 	}
 	return "node"
+}
+
+// hostName is this host's short name if it is a valid name, else "".
+func hostName(hostname func() (string, error)) string {
+	if h, err := hostname(); err == nil {
+		if h, _, _ = strings.Cut(h, "."); config.CheckName(h) == nil {
+			return h
+		}
+	}
+	return ""
+}
+
+// trackerName is the config name of answer s: "" for none.
+func trackerName(s string) (string, error) {
+	if strings.EqualFold(s, "none") {
+		return "", nil
+	}
+	if err := config.CheckName(s); err != nil {
+		return "", fmt.Errorf("the tracker name %v, or none", err)
+	}
+	return s, nil
 }
 
 func isLoopback(raw string) bool {

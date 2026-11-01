@@ -139,6 +139,7 @@ of mempool.space and blockstream.info and of URLs with `/testnet`,
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
+| `name` | string | none | Name of this tracker, in front of every message: `[shb] 🔴 orendil is lagging`. Tells several trackers apart. Same rules as target names. `node-tracker setup` suggests the host name. |
 | `interval` | duration | `30s` | Time between ticks in `run` mode. Minimum `1s`. Ignored by `once`. |
 | `timeout` | duration | `10s` | Timeout of each single call to a node, reference or notifier. Must be > 0 and ≤ `interval`. `.onion` endpoints get at least `30s` (see [Tor](#proxies-and-tor)). |
 | `state_file` | path | `$XDG_STATE_HOME/node-tracker/state.json` (else `~/.local/state/…`) | Where states and undelivered alerts are kept. `-state` overrides it. |

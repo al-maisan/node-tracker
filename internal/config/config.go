@@ -76,6 +76,7 @@ func (Secret) GoString() string { return `"REDACTED"` }
 // is marshalled, as setup does, except targets, node and references: an empty
 // list of references means none.
 type Config struct {
+	Name      string        `yaml:"name,omitempty"` // of this tracker, shown in every message; "" for none
 	Interval  time.Duration `yaml:"interval,omitempty"`
 	Timeout   time.Duration `yaml:"timeout,omitempty"`
 	StateFile string        `yaml:"state_file,omitempty"`
@@ -217,6 +218,11 @@ func (v *validator) bad(path, value, format string, a ...any) {
 }
 
 func (c *Config) validate(v *validator, env Env) {
+	if c.Name != "" {
+		if err := CheckName(c.Name); err != nil {
+			v.bad("name", c.Name, "%v", err)
+		}
+	}
 	c.StateFile = expandHome(c.StateFile)
 	if c.StateFile != "" && !filepath.IsAbs(c.StateFile) {
 		v.bad("state_file", c.StateFile, "must be an absolute path or start with ~/")

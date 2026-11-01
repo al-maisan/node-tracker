@@ -33,6 +33,15 @@ type Message struct {
 	Body    string
 }
 
+// Tag puts the tracker's name, if any, in front of m's subject, so the
+// messages of several trackers can be told apart.
+func Tag(tracker string, m Message) Message {
+	if tracker != "" {
+		m.Subject = "[" + tracker + "] " + m.Subject
+	}
+	return m
+}
+
 // Notifier delivers messages to humans. Implementations must honour ctx.
 type Notifier interface {
 	Name() string

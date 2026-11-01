@@ -268,6 +268,7 @@ func TestSetupLocalNode(t *testing.T) {
 		turn{prompt: "Name of this node in alerts [orendil]: "},
 		turn{prompt: "References: Esplora API URLs separated by spaces, or none [https://mempool.space/api https://blockstream.info/api]: ", answer: w.srv.URL + "/api"},
 		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: "},
 		turn{prompt: "Bot token (input hidden): ", answer: "123:WRONG", secret: true},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "Install and start the systemd service now (node-tracker install-service -user)? [Y/n] "},
@@ -334,7 +335,7 @@ func TestSetupLocalNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tg := cfg.Targets[0]; tg.Name != "orendil" || tg.Node.CookieFile != cookie || len(tg.References) != 1 || *tg.Alert.Threshold != 3 || *tg.Alert.RecoverThreshold != 1 || tg.Alert.For != 2 || tg.Alert.DownFor != 2 {
+	if tg := cfg.Targets[0]; tg.Name != "orendil" || tg.Node.CookieFile != cookie || len(tg.References) != 1 || *tg.Alert.Threshold != 3 || *tg.Alert.RecoverThreshold != 1 || tg.Alert.For != 2 || tg.Alert.DownFor != 2 || cfg.Name != "orendil" {
 		t.Errorf("target %+v", tg)
 	}
 	if n := cfg.Notifiers[0]; n.ChatID != "42" || n.BotTokenFile != tok || cfg.Interval != 30*time.Second {
@@ -369,6 +370,8 @@ func TestSetupOnionNode(t *testing.T) {
 		turn{prompt: "Name of this node in alerts [node]: ", answer: "home"},
 		turn{prompt: "[https://mempool.space/api https://blockstream.info/api]: ", answer: "none"},
 		turn{prompt: "Preset [2]: ", answer: "quiet"},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "my tracker"},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "shb"},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "Chat id or @channel: ", answer: "666"},
 		turn{prompt: "Chat id or @channel: ", answer: "@mychannel"},
@@ -416,10 +419,13 @@ func TestSetupOnionNode(t *testing.T) {
 	}
 	n := cfg.Targets[0].Node
 	if n.URL != "http://"+onion+":8332" || n.Proxy != "socks5://"+socks.addr || n.Username != "nodetracker" || n.PasswordFile != pwFile || string(n.Password) != pw ||
-		len(cfg.Targets[0].References) != 0 || *cfg.Targets[0].Alert.Threshold != 6 || cfg.Targets[0].Alert.DownFor != 5 || cfg.Interval != time.Minute || cfg.Notifiers[0].ChatID != "@mychannel" {
+		len(cfg.Targets[0].References) != 0 || *cfg.Targets[0].Alert.Threshold != 6 || cfg.Targets[0].Alert.DownFor != 5 || cfg.Interval != time.Minute || cfg.Notifiers[0].ChatID != "@mychannel" || cfg.Name != "shb" {
 		t.Errorf("config %+v", cfg)
 	}
-	if got := tg.messages(); len(got) != 1 || !strings.HasPrefix(got[0], "@mychannel: ") {
+	if !strings.Contains(out, "the tracker name must match") {
+		t.Error("an invalid tracker name was not refused")
+	}
+	if got := tg.messages(); len(got) != 1 || !strings.HasPrefix(got[0], "@mychannel: ") || !strings.Contains(got[0], "[shb] ") {
 		t.Errorf("sent %q", got)
 	}
 }
@@ -440,6 +446,7 @@ func TestSetupExistingUserTelegramDown(t *testing.T) {
 		turn{prompt: "Name of this node in alerts [orendil]: "},
 		turn{prompt: "References", answer: "none"},
 		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "none"},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: "},
 		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: ", answer: "t"},
@@ -511,6 +518,7 @@ func TestSetupRemoteNodeTelegramTor(t *testing.T) {
 		turn{prompt: "Name of this node in alerts [node]: "},
 		turn{prompt: "References", answer: "none"},
 		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "none"},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "or [t]ry through Tor (" + tor + ")? [r]: ", answer: "t"},
 		turn{prompt: "press Enter)\n", answer: "42"},
@@ -585,7 +593,7 @@ func TestSetupNonInteractive(t *testing.T) {
 		t.Errorf("install-service %+v", *installs)
 	}
 	cfg, _, err := config.LoadEnv(path, detectEnv)
-	if err != nil || *cfg.Targets[0].Alert.Threshold != 2 || *cfg.Targets[0].Alert.RecoverThreshold != 0 || cfg.Targets[0].Node.Username != "tracker" || cfg.Targets[0].Alert.DownFor != 7 {
+	if err != nil || *cfg.Targets[0].Alert.Threshold != 2 || *cfg.Targets[0].Alert.RecoverThreshold != 0 || cfg.Targets[0].Node.Username != "tracker" || cfg.Targets[0].Alert.DownFor != 7 || cfg.Name != "orendil" {
 		t.Fatalf("config %+v, %v", cfg, err)
 	}
 
@@ -616,6 +624,7 @@ func TestSetupNonInteractive(t *testing.T) {
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-node-url", "http://10.0.0.2:8332", "-cookie-file", "/c"}, "plain http is only allowed"},
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-preset", "slow"}, `-preset "slow"`},
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-down-for", "101"}, "-down-for 101: must be between 1 and 100"},
+		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-tracker-name", "my tracker"}, "-tracker-name: the tracker name must match"},
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-down-for", "-1"}, "-down-for -1: must be between 1 and 100"},
 	} {
 		if code, errs := runSetup(context.Background(), io.Discard, tc.args...); code != exitUsage || !strings.Contains(errs, tc.want) {
@@ -684,6 +693,7 @@ func TestSetupInterrupted(t *testing.T) {
 		turn{prompt: "Name of this node in alerts [orendil]: "},
 		turn{prompt: "References", answer: "none"},
 		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "none"},
 		turn{prompt: "Bot token (input hidden): ", do: cancel},
 	)
 	fakeSetup(t, newFakeTG(t), ft)
