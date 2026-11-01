@@ -88,7 +88,12 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
    ```ini
    rpcauth=nodetracker:<salt>$<hash>
    rpcwhitelist=nodetracker:getblockchaininfo
+   rpcwhitelistdefault=0
    ```
+
+   `rpcwhitelistdefault=0` matters: once any `rpcwhitelist` is set, Bitcoin
+   Core otherwise denies every user without one (the cookie, `bitcoin-cli`,
+   electrs, LND, …).
 
 2. **On the monitoring host**, install Tor and check that its SOCKS port
    works (Debian/Ubuntu):
@@ -141,17 +146,26 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
    HTTP_PROXY=socks5://127.0.0.1:9050 node-tracker check
    ```
 
-   For the systemd user service, add a drop-in:
+   With systemd, every service that talks to the node needs the proxy: the
+   daemon, and `node-tracker-once` / `node-tracker-report` if you use the
+   timers. User services:
 
    ```sh
-   mkdir -p ~/.config/systemd/user/node-tracker.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' > ~/.config/systemd/user/node-tracker.service.d/tor.conf && systemctl --user daemon-reload && systemctl --user restart node-tracker
+   for u in node-tracker node-tracker-once node-tracker-report; do mkdir -p ~/.config/systemd/user/$u.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' > ~/.config/systemd/user/$u.service.d/tor.conf; done && systemctl --user daemon-reload && systemctl --user try-restart node-tracker
    ```
 
-   For the system service, put the same drop-in under
-   `/etc/systemd/system/node-tracker.service.d/`.
+   System services:
+
+   ```sh
+   for u in node-tracker node-tracker-once node-tracker-report; do sudo mkdir -p /etc/systemd/system/$u.service.d && printf '[Service]\nEnvironment=HTTP_PROXY=socks5://127.0.0.1:9050\n' | sudo tee /etc/systemd/system/$u.service.d/tor.conf >/dev/null; done && sudo systemctl daemon-reload && sudo systemctl try-restart node-tracker
+   ```
 
 If Tor on the monitoring host stops, the node shows as `NODE_DOWN`: it
 can't be watched then, so that is the right alert.
+
+For the opposite case, a local node reached directly and the references and
+Telegram through Tor, see
+[Proxies and Tor](configuration.md#proxies-and-tor).
 
 ## Status reports
 
