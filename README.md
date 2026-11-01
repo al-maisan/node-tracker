@@ -9,7 +9,9 @@
 
 **Get a Telegram message when your Bitcoin node falls behind the chain tip, and another when it catches up.**
 
-**Install:** the PPA on Ubuntu 26.04, COPR on Fedora, the `.deb` on
+**Install:** the [PPA](https://launchpad.net/~al-maisan/+archive/ubuntu/node-tracker)
+on Ubuntu 26.04, [COPR](https://copr.fedorainfracloud.org/coprs/al-maisan/node-tracker/)
+on Fedora, the `.deb` on
 Debian and Raspberry Pi OS, `brew install al-maisan/tap/node-tracker` on
 macOS; see [Install](#install) for these, the signed release archive (any
 Linux) and `go install`. Then follow the [Quick start](#quick-start).
