@@ -22,6 +22,7 @@ import (
 
 	"github.com/al-maisan/node-tracker/internal/app"
 	"github.com/al-maisan/node-tracker/internal/config"
+	"github.com/al-maisan/node-tracker/internal/explain"
 	"github.com/al-maisan/node-tracker/internal/health"
 	"github.com/al-maisan/node-tracker/internal/monitor"
 	"github.com/al-maisan/node-tracker/internal/notify"
@@ -137,18 +138,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if cmd == "run" || cmd == "check" {
 		detectLevel = slog.LevelInfo
 	}
-	cfg, m, code := setup(o, log, detectLevel, stderr)
+	cfg, warns, m, code := setup(o, log, detectLevel, stderr)
 	if m == nil {
 		return code
 	}
+	if cmd == "check" {
+		return checkWarns(ctx, m, cfg, warns, stdout, log) // in the verdict
+	}
+	for _, w := range warns {
+		log.Warn("config", "warning", w)
+	}
 
 	switch cmd {
-	case "check":
-		return check(ctx, m, cfg, stdout, log)
 	case "report":
 		return report(ctx, m, cfg, log)
 	case "test-notify":
-		return testNotify(ctx, m, cfg, fs.Arg(0), log)
+		return testNotify(ctx, m, cfg, fs.Arg(0), stderr, log)
 	default:
 		return tick(ctx, cmd, m, cfg, o, log)
 	}
@@ -193,24 +198,26 @@ func installService(ctx context.Context, args []string, stdout, stderr io.Writer
 	return exitOK
 }
 
-// setup loads the config and builds the monitor. Config errors go to stderr
-// as plain multi-line text, which reads better than a log line.
-func setup(o options, log *slog.Logger, detectLevel slog.Level, stderr io.Writer) (*config.Config, *monitor.Monitor, int) {
+// setup loads the config and builds the monitor, and returns the config
+// warnings for the caller to show. Config errors go to stderr as plain
+// multi-line text, which reads better than a log line; the warnings are
+// logged with them.
+func setup(o options, log *slog.Logger, detectLevel slog.Level, stderr io.Writer) (*config.Config, []string, *monitor.Monitor, int) {
 	path := o.config
 	if path == "" {
 		var err error
 		if path, err = config.DefaultConfigPath(); err != nil {
 			log.Error("no config path", "err", err)
-			return nil, nil, exitUsage
+			return nil, nil, nil, exitUsage
 		}
 	}
 	cfg, warns, err := config.LoadEnv(path, detectEnv)
-	for _, w := range warns {
-		log.Warn("config", "warning", w)
-	}
 	if err != nil {
+		for _, w := range warns {
+			log.Warn("config", "warning", w)
+		}
 		fmt.Fprintf(stderr, "node-tracker: %v\n", err)
-		return nil, nil, exitUsage
+		return nil, nil, nil, exitUsage
 	}
 	if d := cfg.Detected; d != nil {
 		log.Log(context.Background(), detectLevel, "detected local bitcoind", "conf", cmp.Or(d.Conf, "none"), "chain", d.Chain, "url", d.URL, "cookie_file", d.CookieFile)
@@ -227,9 +234,9 @@ func setup(o options, log *slog.Logger, detectLevel slog.Level, stderr io.Writer
 	m, err := app.Build(cfg, log)
 	if err != nil {
 		log.Error("building monitor failed", "err", err)
-		return nil, nil, exitUsage
+		return nil, nil, nil, exitUsage
 	}
-	return cfg, m, exitOK
+	return cfg, warns, m, exitOK
 }
 
 // tick runs `run` or `once`.
@@ -304,7 +311,9 @@ func report(ctx context.Context, m *monitor.Monitor, cfg *config.Config, log *sl
 	return syncCode(res)
 }
 
-func testNotify(ctx context.Context, m *monitor.Monitor, cfg *config.Config, name string, log *slog.Logger) int {
+// testNotify sends the test message. Failures go to stderr as plain lines,
+// one per notifier, with a hint at the likely cause.
+func testNotify(ctx context.Context, m *monitor.Monitor, cfg *config.Config, name string, stderr io.Writer, log *slog.Logger) int {
 	if name != "" {
 		n, ok := m.Notifiers[name]
 		if !ok {
@@ -315,11 +324,18 @@ func testNotify(ctx context.Context, m *monitor.Monitor, cfg *config.Config, nam
 	}
 	sctx, cancel := context.WithTimeout(ctx, 3*cfg.Timeout)
 	defer cancel()
-	if err := m.Broadcast(sctx, notify.Test(time.Now())); err != nil {
-		log.Error("test message failed", "err", err)
-		return exitFailure
+	err := m.Broadcast(sctx, notify.Test(time.Now()))
+	if err == nil {
+		return exitOK
 	}
-	return exitOK
+	errs := []error{err}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = j.Unwrap() // one per notifier
+	}
+	for _, e := range errs {
+		fmt.Fprintf(stderr, "node-tracker: test message failed: %s\n", explain.Telegram(e))
+	}
+	return exitFailure
 }
 
 // syncCode is exitNotInSync if any target was observed in a state other

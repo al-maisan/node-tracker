@@ -17,20 +17,18 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/al-maisan/node-tracker/internal/app"
 	"github.com/al-maisan/node-tracker/internal/config"
+	"github.com/al-maisan/node-tracker/internal/explain"
 	"github.com/al-maisan/node-tracker/internal/fsx"
 	"github.com/al-maisan/node-tracker/internal/httpx"
 	"github.com/al-maisan/node-tracker/internal/notify"
@@ -61,7 +59,6 @@ const (
 
 var (
 	rpcUserRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	botUserRE = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 
 	errInputEnded   = errors.New("input ended")
 	errDeclined     = errors.New("nothing written")
@@ -394,7 +391,7 @@ func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local b
 			return h.Chain, true, err
 		}
 	} else {
-		fmt.Fprintf(w.out, "No local bitcoind answered at %s with the cookie %s: %s\n", d.URL, d.CookieFile, explain(ce, err))
+		fmt.Fprintf(w.out, "No local bitcoind answered at %s with the cookie %s: %s\n", d.URL, d.CookieFile, explain.Node(ce, app.Proxy(ce) != "none", err))
 	}
 	for {
 		var pw config.Secret
@@ -410,7 +407,7 @@ func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local b
 				a.node, a.password = e, pw
 				return h.Chain, local, nil
 			}
-			fmt.Fprintf(w.out, "failed: %s\n", explain(ce, err))
+			fmt.Fprintf(w.out, "failed: %s\n", explain.Node(ce, app.Proxy(ce) != "none", err))
 			c, err := w.choose(ctx, "[r]etry, [c]hange the settings, or [k]eep them untested?", "rck")
 			if err != nil {
 				return "", false, err
@@ -460,7 +457,7 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 		}
 	}
 
-	if isOnion(e.URL) {
+	if explain.IsOnion(e.URL) {
 		def := effectiveProxy(ce)
 		for {
 			p, err := w.ask(ctx, "Tor SOCKS proxy", def)
@@ -479,7 +476,7 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 				continue
 			}
 			if err := dialProxy(ctx, p); err != nil {
-				fmt.Fprintf(w.out, "Tor does not answer at %s: %s. Install and start Tor (Debian/Ubuntu: sudo apt install -y tor && sudo systemctl enable --now tor), see docs/operations.md#tor. Enter retries.\n", p, printable(err.Error()))
+				fmt.Fprintf(w.out, "Tor does not answer at %s: %s. Install and start Tor (Debian/Ubuntu: sudo apt install -y tor && sudo systemctl enable --now tor), see docs/operations.md#tor. Enter retries.\n", p, explain.Printable(err.Error()))
 				continue
 			}
 			break
@@ -616,7 +613,7 @@ func (w *wizard) testRefs(ctx context.Context, refs []config.Endpoint) bool {
 		h, _, err := w.height(ctx, r)
 		if err != nil {
 			ok = false
-			fmt.Fprintf(w.out, "  %s: failed: %s\n", r.Name, printable(err.Error()))
+			fmt.Fprintf(w.out, "  %s: failed: %s\n", r.Name, explain.Printable(err.Error()))
 			continue
 		}
 		fmt.Fprintf(w.out, "  %s: height %s\n", r.Name, notify.Num(h.Blocks))
@@ -701,8 +698,8 @@ func (w *wizard) checkToken(ctx context.Context, tok config.Secret) (string, err
 	case errors.Is(err, telegram.ErrBadToken):
 		return "", errors.New("telegram rejected the token; copy it again from @BotFather")
 	case err != nil:
-		return "", fmt.Errorf("%w: %s", errTelegramDown, printable(err.Error()))
-	case !botUserRE.MatchString(user):
+		return "", fmt.Errorf("%w: %s", errTelegramDown, explain.Printable(err.Error()))
+	case !explain.BotUser.MatchString(user):
 		return "", fmt.Errorf("telegram: unexpected bot username %q", user)
 	}
 	return user, nil
@@ -744,7 +741,7 @@ func (w *wizard) askChat(ctx context.Context, tok config.Secret, user string) (s
 		case pctx.Err() != nil:
 			fmt.Fprintf(w.out, "Nothing arrived within %s.\n", w.waitChat)
 		default:
-			fmt.Fprintf(w.out, "Could not read the bot's messages: %s\n", printable(r.err.Error()))
+			fmt.Fprintf(w.out, "Could not read the bot's messages: %s\n", explain.Printable(r.err.Error()))
 		}
 	case l, ok := <-w.input():
 		cancel()
@@ -799,11 +796,11 @@ func isStart(text, bot, nonce string) bool {
 func chatName(c telegram.Chat) string {
 	switch {
 	case c.Type == "private" && c.Username != "":
-		return "you (@" + printable(c.Username) + ")"
+		return "you (@" + explain.Printable(c.Username) + ")"
 	case c.Type == "private":
-		return "you (" + printable(c.FirstName) + ")"
+		return "you (" + explain.Printable(c.FirstName) + ")"
 	}
-	return c.Type + " " + strconv.Quote(printable(c.Title))
+	return c.Type + " " + strconv.Quote(explain.Printable(c.Title))
 }
 
 // sendTest sends the test message of test-notify. Its errors say what to do.
@@ -814,14 +811,7 @@ func (w *wizard) sendTest(ctx context.Context, tok config.Secret, chatID string)
 	if err == nil {
 		return nil
 	}
-	msg := printable(err.Error())
-	switch {
-	case strings.Contains(msg, "chat not found"):
-		msg += " (wrong chat id, or the bot was never started in that chat)"
-	case strings.Contains(msg, "HTTP 403"):
-		msg += " (the bot is blocked, or not a member of that chat; a channel needs it as an administrator)"
-	}
-	return errors.New(msg)
+	return errors.New(explain.Telegram(err))
 }
 
 // fromFlags takes the answers from the flags, and tests them as the
@@ -873,13 +863,13 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 		return nil, err
 	}
 	// As interviewed: the service may lack this shell's proxy variables.
-	if p := effectiveProxy(ce); isOnion(ce.URL) && a.node.Proxy == "" && p != config.DefaultTorProxy {
+	if p := effectiveProxy(ce); explain.IsOnion(ce.URL) && a.node.Proxy == "" && p != config.DefaultTorProxy {
 		a.node.Proxy = p
 	}
 	h, _, err := w.height(ctx, ce)
 	switch {
 	case err != nil:
-		fmt.Fprintf(w.out, "warning: the node did not answer: %s\n", explain(ce, err))
+		fmt.Fprintf(w.out, "warning: the node did not answer: %s\n", explain.Node(ce, app.Proxy(ce) != "none", err))
 	default:
 		fmt.Fprintf(w.out, "node %s: %s\n", a.node.URL, heightInfo(h))
 	}
@@ -1157,32 +1147,6 @@ func (w *wizard) offerService(ctx context.Context, path string, root, replaced b
 	return exitOK, nil
 }
 
-// explain is a node error with hints for its likely cause.
-func explain(e config.Endpoint, err error) string {
-	msg := printable(err.Error())
-	if h := hint(e, err); h != "" {
-		msg += " (" + h + ")"
-	}
-	if e.CookieFile == "" {
-		return msg
-	}
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		msg += ". Is bitcoind running? It writes the cookie on start. If its datadir is elsewhere, give the cookie's path"
-	case errors.Is(err, fs.ErrPermission):
-		g := "bitcoind's group"
-		if fi, err := os.Stat(e.CookieFile); err == nil {
-			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-				if gr, err := user.LookupGroupId(strconv.Itoa(int(st.Gid))); err == nil {
-					g = gr.Name
-				}
-			}
-		}
-		msg += fmt.Sprintf(". To read it, join its group: sudo usermod -aG %s \"$USER\", then log in again; on Bitcoin Core 28+ also set rpccookieperms=group in bitcoin.conf", g)
-	}
-	return msg
-}
-
 func heightInfo(h source.Height) string {
 	s := fmt.Sprintf("chain %s, height %s", cmp.Or(h.Chain, "unknown"), notify.Num(h.Blocks))
 	if h.Headers > h.Blocks {
@@ -1267,17 +1231,6 @@ func dialProxy(ctx context.Context, proxy string) error {
 func tail(s config.Secret) string {
 	r := []rune(string(s))
 	return string(r[max(0, len(r)-4):])
-}
-
-// printable replaces what a terminal could interpret, such as escape
-// sequences, in text from the network.
-func printable(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return '?'
-	}, s)
 }
 
 func indent(b []byte) string {

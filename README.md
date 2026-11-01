@@ -37,7 +37,7 @@ notifier telegram  token valid (@orendil_bot) · chat not tested → run 'node-t
 > Node height: 974,079
 > Network height: 974,085 (esplora:mempool.space)
 > Lag: 6 blocks
-> Was: OK
+> Was: in sync
 > At: 2026-11-01 08:30:00 UTC
 
 ![node-tracker demo: check, test-notify, then two once runs raising a LAGGING alert](docs/demo/demo.gif)

@@ -46,7 +46,9 @@ Uses the same state file as
 .BR run .
 .TP
 .B check
-Dry run: sample every target and print a table.
+Dry run: sample every target and print a table, with a hint at the likely
+cause of each error, then a verdict on the setup that lists the config
+warnings.
 No state is read or written and no alert is sent.
 .TP
 .B report
@@ -56,6 +58,7 @@ Send a status report of every target to every notifier, whatever the state.
 Send a test message to the notifier
 .IR name ,
 or to all notifiers.
+A failure is printed with a hint at its likely cause.
 .TP
 .B version
 Print the version, commit, build time and Go version.

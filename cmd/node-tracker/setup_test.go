@@ -393,7 +393,7 @@ func TestSetupOnionNode(t *testing.T) {
 		"Tor does not answer at socks5://127.0.0.1:1: dial tcp 127.0.0.1:1: connect: connection refused. Install and start Tor",
 		"Testing the node … ok: chain main, height 938,266\n",
 		"Telegram refuses to hand out the bot's messages: the bot has a webhook",
-		"failed: telegram: HTTP 400: Bad Request: chat not found (wrong chat id, or the bot was never started in that chat)\n",
+		"failed: HTTP 400: Bad Request: chat not found (wrong chat id, or the bot was never started in that chat)\n",
 		"backed up " + path + " to " + path + ".bak\n",
 		"Start it later with: node-tracker install-service -user -config " + path,
 	} {
@@ -602,12 +602,6 @@ func TestIsStart(t *testing.T) {
 		if got := isStart(text, "nt_test_bot", n); got != want {
 			t.Errorf("isStart(%q) = %v, want %v", text, got, want)
 		}
-	}
-}
-
-func TestPrintable(t *testing.T) {
-	if got := printable("a\x1b[2Jb\nc\u202ed é"); got != "a?[2Jb?c?d é" {
-		t.Errorf("printable = %q", got)
 	}
 }
 

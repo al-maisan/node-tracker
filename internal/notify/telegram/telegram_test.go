@@ -49,6 +49,9 @@ func TestNotify(t *testing.T) {
 			if (err != nil) != tt.wantErr || notify.IsPermanent(err) != tt.wantPermanent {
 				t.Fatalf("err = %v (permanent=%v)", err, notify.IsPermanent(err))
 			}
+			if err != nil && strings.HasPrefix(err.Error(), "telegram:") { // callers add the notifier's name
+				t.Fatalf("err = %v, want no prefix", err)
+			}
 			if ra := (*notify.RetryAfter)(nil); errors.As(err, &ra) != (tt.wantAfter != 0) || (ra != nil && ra.After != tt.wantAfter) {
 				t.Fatalf("retry-after: %v", err)
 			}
