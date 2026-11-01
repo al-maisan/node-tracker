@@ -217,6 +217,15 @@ Alert preset:
 (default) or
 .BR quiet .
 .TP
+.BI \-down\-for " n"
+Checks in a row a node must be unreachable before
+.B NODE_DOWN
+(1\-100), written as
+.BR alert.down_for .
+Default: as
+.B for
+of the preset; for a .onion node about 5 minutes, as Tor stalls at times.
+.TP
 .BI \-token\-file " file"
 File holding the Telegram bot token (required); it is copied next to the
 configuration.
