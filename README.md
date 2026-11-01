@@ -31,7 +31,9 @@ the alerts look like this:
   references are alerted too.
 - **Never loses an alert:** alerts wait in the state file until delivered.
 - **Runs your way:** daemon, systemd timer, cron or by hand, all with the
-  same behavior; optional hourly reports prove the alerting works.
+  same behavior; optional hourly reports prove the alerting works. Several
+  trackers can share a chat: `name:` puts each one's name in front of its
+  alerts.
 - **Secure by default:** secrets only from files or the environment, only
   the read-only `getblockchaininfo` RPC, plain http only to localhost or
   `.onion` through Tor.
