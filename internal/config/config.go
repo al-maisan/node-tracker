@@ -121,6 +121,7 @@ type Alert struct {
 	Threshold        *uint64 `yaml:"threshold,omitempty"`
 	RecoverThreshold *uint64 `yaml:"recover_threshold,omitempty"`
 	For              int     `yaml:"for,omitempty"`
+	DownFor          int     `yaml:"down_for,omitempty"` // default: For
 }
 
 // Notifier is an alert channel.
@@ -407,6 +408,12 @@ func (a *Alert) validate(v *validator, p string) {
 	}
 	if a.For < 1 || a.For > maxFor {
 		v.errf(p+".for", "must be between 1 and %d", maxFor)
+	}
+	if a.DownFor == 0 {
+		a.DownFor = a.For
+	}
+	if a.DownFor < 1 || a.DownFor > maxFor {
+		v.errf(p+".down_for", "must be between 1 and %d", maxFor)
 	}
 }
 

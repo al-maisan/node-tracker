@@ -331,7 +331,7 @@ func TestSetupLocalNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tg := cfg.Targets[0]; tg.Name != "orendil" || tg.Node.CookieFile != cookie || len(tg.References) != 1 || *tg.Alert.Threshold != 3 || *tg.Alert.RecoverThreshold != 1 || tg.Alert.For != 2 {
+	if tg := cfg.Targets[0]; tg.Name != "orendil" || tg.Node.CookieFile != cookie || len(tg.References) != 1 || *tg.Alert.Threshold != 3 || *tg.Alert.RecoverThreshold != 1 || tg.Alert.For != 2 || tg.Alert.DownFor != 2 {
 		t.Errorf("target %+v", tg)
 	}
 	if n := cfg.Notifiers[0]; n.ChatID != "42" || n.BotTokenFile != tok || cfg.Interval != 30*time.Second {
@@ -412,7 +412,7 @@ func TestSetupOnionNode(t *testing.T) {
 	}
 	n := cfg.Targets[0].Node
 	if n.URL != "http://"+onion+":8332" || n.Proxy != "socks5://"+socks.addr || n.Username != "nodetracker" || n.PasswordFile != pwFile || string(n.Password) != pw ||
-		len(cfg.Targets[0].References) != 0 || *cfg.Targets[0].Alert.Threshold != 6 || cfg.Interval != time.Minute || cfg.Notifiers[0].ChatID != "@mychannel" {
+		len(cfg.Targets[0].References) != 0 || *cfg.Targets[0].Alert.Threshold != 6 || cfg.Targets[0].Alert.DownFor != 5 || cfg.Interval != time.Minute || cfg.Notifiers[0].ChatID != "@mychannel" {
 		t.Errorf("config %+v", cfg)
 	}
 	if got := tg.messages(); len(got) != 1 || !strings.HasPrefix(got[0], "@mychannel: ") {

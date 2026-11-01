@@ -90,6 +90,11 @@ Rules:
     between `LAGGING` and `NODE_DOWN` would reset the counter forever and
     never alert.
   - `OK` counts on its own: one good sample after trouble is not recovery.
+  - A change to `NODE_DOWN` needs `down_for` samples (default `for`). A
+    node reached over Tor is unreachable for minutes at times, while a
+    lagging node answers; so `NODE_DOWN` can wait longer than `LAGGING`.
+    The threshold is that of the state the target would move to, so a node
+    that answers behind is still `LAGGING` after `for`.
 - **Optional hysteresis:** `recover_threshold` (default = `threshold`). The
   state goes back to `OK` only when lag ≤ `recover_threshold`. The last
   OK/LAGGING verdict is stored separately from the current state, so the

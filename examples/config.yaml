@@ -46,6 +46,7 @@ targets:
       threshold: 3            # LAGGING when the node is more than 3 blocks behind
       recover_threshold: 1    # optional; back to OK at 1 block or less (default: threshold)
       for: 2                  # optional; a change must be seen 2 ticks in a row (default 2)
+      # down_for: 10          # optional; NODE_DOWN only after 10 ticks, e.g. for a node over Tor (default: for)
 
     notify: [telegram]        # optional; default: every notifier
 

@@ -32,6 +32,7 @@ type Rule struct {
 	Threshold uint64 // LAGGING when lag > Threshold
 	Recover   uint64 // back to OK when lag <= Recover (Recover <= Threshold)
 	For       int    // a change must be seen For samples in a row (>= 1)
+	DownFor   int    // a change to NODE_DOWN needs this many instead; 0 = For
 	Outlier   uint64 // with 3+ references, ignore one more than this many blocks above all others; 0 = off
 }
 
@@ -180,7 +181,9 @@ func (t Target) Lagging() bool { return t.LastLag == Lagging }
 // NO_REFERENCE). Bad states count together, so LAGGING, NODE_DOWN, LAGGING
 // is as much "not OK" as LAGGING three times, and the target moves to the
 // latest one. OK must be seen For times in a row on its own: one good
-// sample after trouble is not recovery.
+// sample after trouble is not recovery. A change to NODE_DOWN needs DownFor
+// samples, if set: a node reached over Tor is unreachable for minutes at
+// times.
 func Step(t Target, observed State, r Rule, now time.Time) (next Target, alert bool) {
 	if observed == t.Current {
 		return Target{Current: t.Current, Since: t.Since, LastLag: t.LastLag}, false
@@ -191,7 +194,11 @@ func Step(t Target, observed State, r Rule, now time.Time) (next Target, alert b
 		t.Seen = 1
 	}
 	t.Candidate = observed
-	if t.Seen < max(r.For, 1) {
+	need := max(r.For, 1)
+	if observed == NodeDown && r.DownFor > 0 {
+		need = r.DownFor
+	}
+	if t.Seen < need {
 		return t, false
 	}
 	alert = !(t.Current == Unknown && observed == OK)
