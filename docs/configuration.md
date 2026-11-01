@@ -12,10 +12,15 @@ and every problem is reported in one go:
 ```text
 $ node-tracker check
 node-tracker: /home/me/.config/node-tracker/config.yaml: invalid config:
-notifiers[0].chat_id: must be a numeric chat id or @channelname
+notifiers[0].chat_id "<chat id>": must be a numeric chat id or @channelname; this looks like a placeholder
 notifiers[0].bot_token_env: environment variable NOPE_UNSET is not set or empty
+targets[0].node.url "http://$ONION:8332": invalid character "$" in host name; YAML does not expand environment variables
 targets[0].alert.threshold: required (lag in blocks)
 ```
+
+Errors show the rejected value, with a hint for common mistakes (`$VAR`,
+`<placeholder>`, a URL without `http://`). Secrets are never shown: the
+`user:pass@` part of a URL is printed as `REDACTED@`.
 
 Run `node-tracker check` after each change.
 
