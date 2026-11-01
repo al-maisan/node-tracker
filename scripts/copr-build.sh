@@ -7,7 +7,7 @@
 # x86_64 and aarch64. COPR_CHROOTS="fedora-44-x86_64 ..." overrides the list.
 # A chroot is done if a build of this version succeeded or is still running
 # there; COPR_FORCE=1 builds for all of them anyway.
-# Needs go, gh, curl, python3, rpmbuild and a configured copr-cli.
+# Needs go, curl, python3, rpmbuild and a configured copr-cli.
 set -euo pipefail
 
 owner=al-maisan
