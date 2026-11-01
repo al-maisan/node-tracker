@@ -97,7 +97,13 @@ delivers this:
    sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker
    ```
 
-   The package installs `/usr/bin/node-tracker`, the systemd units (none
+   Or, on Fedora (x86_64, aarch64):
+
+   ```sh
+   sudo dnf copr enable al-maisan/node-tracker && sudo dnf install node-tracker
+   ```
+
+   Either package installs `/usr/bin/node-tracker`, the systemd units (none
    is enabled) and a `node-tracker` system user. The docs and example
    config are in `/usr/share/doc/node-tracker`; see
    [docs/operations.md](docs/operations.md#from-a-package) for the setup.
