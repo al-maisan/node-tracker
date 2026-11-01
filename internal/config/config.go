@@ -351,6 +351,11 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 			v.bad(p+".url", e.URL, "plain http to .onion needs a loopback proxy; %q%s would see the RPC credentials. Use a local Tor, or set allow_insecure: true if that network is trusted",
 				redactURL(proxy.String()), from)
 		}
+	} else if proxy != nil && u.Scheme == "http" && !e.AllowInsecure && !isLoopback(proxy.Hostname()) {
+		// Plain http is allowed for loopback hosts, but a proxy set here is
+		// used for them too, and would see (and could change) the traffic.
+		// The environment's proxy skips loopback hosts.
+		v.bad(p+".proxy", e.Proxy, "plain http url needs a loopback proxy; this one would see the RPC credentials and heights. Use https, a local proxy, or allow_insecure: true if that network is trusted")
 	}
 
 	switch e.Kind {

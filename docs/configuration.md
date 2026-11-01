@@ -246,7 +246,9 @@ Esplora REST API: `GET {url}/blocks/tip/height`.
 `127.0.0.0/8`, `::1` and, for nodes and references, `.onion` hosts reached
 through a loopback proxy (Tor encrypts the traffic itself). Any other `http://` endpoint URL needs
 `allow_insecure: true`. Set it only when the network path is trusted, for
-example a LAN or a WireGuard tunnel. A notifier's `api_url` must use
+example a LAN or a WireGuard tunnel. A `proxy` set on an `http://`
+endpoint must be loopback too, as it sees the traffic, unless
+`allow_insecure: true`. A notifier's `api_url` must use
 `https://` unless its host is loopback, `.onion` included.
 
 ## `notifiers[]`
