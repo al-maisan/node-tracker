@@ -287,7 +287,8 @@ func TestProxy(t *testing.T) {
 	const chat = `    chat_id: "-1001234567890"` + "\n"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _, err := Load(write(t, strings.Replace(valid, node, node+"      proxy: "+tt.proxy+"\n", 1)))
+			// https: the plain-http rule is TestRemoteProxy's.
+			c, _, err := Load(write(t, strings.Replace(valid, node, "      url: https://127.0.0.1:8332\n      proxy: "+tt.proxy+"\n", 1)))
 			switch {
 			case tt.want == "" && err != nil:
 				t.Fatal(err)
@@ -315,6 +316,35 @@ func TestProxy(t *testing.T) {
 				t.Fatalf("CheckProxy = %v, want %s", err, tt.want)
 			}
 		})
+	}
+}
+
+// A proxy on a plain-http endpoint must be loopback: it sees the traffic.
+// A remote one is fine for https, or with allow_insecure.
+func TestRemoteProxy(t *testing.T) {
+	const node = "      url: http://127.0.0.1:8332\n"
+	for proxy, want := range map[string]string{
+		"http://10.0.0.1:3128":      `targets[0].node.proxy "http://10.0.0.1:3128": plain http url needs a loopback proxy`,
+		"https://proxy.example.com": `targets[0].node.proxy "https://proxy.example.com": plain http url needs a loopback proxy`,
+		"http://127.0.0.1:3128":     "",
+	} {
+		_, _, err := Load(write(t, strings.Replace(valid, node, node+"      proxy: "+proxy+"\n", 1)))
+		if (want == "") != (err == nil) || err != nil && !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v", proxy, err)
+		}
+	}
+	for _, n := range []string{
+		"      url: https://node.example:8332\n      proxy: http://10.0.0.1:3128\n",
+		node + "      proxy: http://10.0.0.1:3128\n      allow_insecure: true\n",
+	} {
+		if _, _, err := Load(write(t, strings.Replace(valid, node, n, 1))); err != nil {
+			t.Errorf("%q: %v", n, err)
+		}
+	}
+	ref := "      - kind: esplora\n        url: https://mempool.space/api\n"
+	_, _, err := Load(write(t, strings.Replace(valid, ref, "      - {kind: esplora, url: \"http://localhost:3000/api\", proxy: \"socks5://10.0.0.2:1080\"}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), `targets[0].references[0].proxy "socks5://10.0.0.2:1080": plain http url needs a loopback proxy`) {
+		t.Errorf("reference: err = %v", err)
 	}
 }
 
