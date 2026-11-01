@@ -18,9 +18,24 @@ make lint         # gofmt, go vet, staticcheck
 make vuln         # govulncheck
 make integration  # needs bitcoind in PATH; starts a throwaway regtest node
 make build        # bin/node-tracker with version, commit and build time
+make dist         # release archives + SHA256SUMS in dist/ (needs GNU tar)
 ```
 
-CI runs `lint`, `test` and `vuln` on every pull request.
+CI runs `lint`, `test`, `vuln` and `dist` on every pull request.
+
+## Releasing
+
+1. Tag the release commit with a signed tag and push it:
+   `git tag -s v1.2.3 -m v1.2.3 && git push origin v1.2.3`
+2. Run `make release`. It checks that the tree is clean and that the one
+   `v*` tag at HEAD is signed and pushed, builds `dist/`, signs
+   `SHA256SUMS` with your default gpg key and creates the GitHub release
+   with `gh`.
+
+Release builds use the commit time as build time, so the archives are
+reproducible: with the same Go toolchain (see `node-tracker version`),
+`git checkout v1.2.3 && make dist VERSION=v1.2.3 BUILD_TIME=<build time from node-tracker version>`
+gives the same `SHA256SUMS`.
 
 ## Guidelines
 

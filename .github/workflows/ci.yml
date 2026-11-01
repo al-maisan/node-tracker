@@ -23,3 +23,5 @@ jobs:
       - run: make test
       - run: make vuln
       - run: make build && ./bin/node-tracker version
+      - run: make dist
+      - run: cd dist && sha256sum -c SHA256SUMS && tar -xzf node-tracker_*_linux_amd64.tar.gz && ./node-tracker_*_linux_amd64/node-tracker version
