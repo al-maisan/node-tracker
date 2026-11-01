@@ -128,7 +128,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	switch cmd {
 	case "check":
-		return check(ctx, m, stdout, log)
+		return check(ctx, m, cfg, stdout, log)
 	case "report":
 		return report(ctx, m, cfg, log)
 	case "test-notify":
@@ -222,7 +222,9 @@ func tick(ctx context.Context, cmd string, m *monitor.Monitor, cfg *config.Confi
 	return syncCode(res)
 }
 
-func check(ctx context.Context, m *monitor.Monitor, w io.Writer, log *slog.Logger) int {
+// check prints the observed state of every target, then the proxy of every
+// endpoint.
+func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Writer, log *slog.Logger) int {
 	res, err := m.Observe(ctx, nil)
 	if err != nil {
 		log.Warn("interrupted", "err", err)
@@ -232,6 +234,14 @@ func check(ctx context.Context, m *monitor.Monitor, w io.Writer, log *slog.Logge
 	fmt.Fprintln(tw, "TARGET\tSTATE\tNODE\tTIP\tLAG\tTIP FROM\tERROR")
 	for _, r := range res {
 		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n", r.Target, r.State, r.Node, r.Tip, r.Lag, r.TipFrom, r.Err)
+	}
+	tw.Flush()
+	fmt.Fprintln(w)
+	fmt.Fprintln(tw, "TARGET\tENDPOINT\tPROXY")
+	for _, t := range cfg.Targets {
+		for _, e := range append([]config.Endpoint{t.Node}, t.References...) {
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", t.Name, e.Name, app.Proxy(e))
+		}
 	}
 	tw.Flush()
 	return syncCode(res)

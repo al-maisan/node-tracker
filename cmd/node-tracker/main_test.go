@@ -1,14 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,6 +148,148 @@ func TestCheckReportAndTestNotify(t *testing.T) {
 	}
 	if code, _, _ := exec(t, "test-notify", "-config", cfg, "nope"); code != exitUsage {
 		t.Fatalf("unknown notifier: code=%d", code)
+	}
+}
+
+// socks5 is a minimal SOCKS5 server (no auth, CONNECT only). It records the
+// requested addresses and connects every request to backend.
+type socks5 struct {
+	addr   string
+	mu     sync.Mutex
+	dialed []string
+}
+
+func newSOCKS5(t *testing.T, backend string) *socks5 {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	s := &socks5{addr: ln.Addr().String()}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go s.serve(c, backend)
+		}
+	}()
+	return s
+}
+
+func (s *socks5) serve(c net.Conn, backend string) {
+	defer c.Close()
+	r := bufio.NewReader(c)
+	read := func(n int) []byte {
+		b := make([]byte, n)
+		if _, err := io.ReadFull(r, b); err != nil {
+			return nil
+		}
+		return b
+	}
+	// Greeting: VER NMETHODS METHODS; reply "no auth". Request: VER CMD RSV ATYP ADDR PORT.
+	h := read(2)
+	if h == nil || h[0] != 5 || read(int(h[1])) == nil {
+		return
+	}
+	c.Write([]byte{5, 0})
+	req := read(4)
+	if req == nil || req[1] != 1 {
+		return
+	}
+	var host string
+	switch req[3] {
+	case 1, 4:
+		host = net.IP(read(map[byte]int{1: 4, 4: 16}[req[3]])).String()
+	case 3:
+		n, _ := r.ReadByte()
+		host = string(read(int(n)))
+	}
+	port := read(2)
+	if host == "" || port == nil {
+		return
+	}
+	s.mu.Lock()
+	s.dialed = append(s.dialed, net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(port)))))
+	s.mu.Unlock()
+	up, err := net.Dial("tcp", backend)
+	if err != nil {
+		c.Write([]byte{5, 1, 0, 1, 0, 0, 0, 0, 0, 0})
+		return
+	}
+	defer up.Close()
+	c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+	go io.Copy(up, r)
+	io.Copy(c, up)
+}
+
+// A .onion node needs no allow_insecure and goes through its proxy only;
+// the reference next to it is reached directly.
+func TestOnionNodeThroughProxy(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	socks := newSOCKS5(t, w.srv.Listener.Addr().String())
+	cfg, _ := w.config(t)
+	b, _ := os.ReadFile(cfg)
+	node := fmt.Sprintf("url: http://%s:8332/rpc, proxy: socks5://%s", onion, socks.addr)
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "url: "+w.srv.URL+"/rpc", node, 1)), 0o600)
+
+	code, out, errs := exec(t, "check", "-config", cfg)
+	if code != exitOK || !strings.Contains(out, "btc     OK     938266") {
+		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	}
+	for _, re := range []string{
+		`btc +bitcoind:` + onion + `:8332 +socks5://` + socks.addr + `\n`,
+		`btc +esplora:127\.0\.0\.1:\d+ +none\n`,
+	} {
+		if !regexp.MustCompile(re).MatchString(out) {
+			t.Errorf("check output lacks %s:\n%s", re, out)
+		}
+	}
+	socks.mu.Lock()
+	defer socks.mu.Unlock()
+	if len(socks.dialed) != 1 || socks.dialed[0] != onion+":8332" {
+		t.Fatalf("proxy dialed %q, want only the node", socks.dialed)
+	}
+}
+
+const envChild = "NT_TEST_ENV_PROXY_CHECK"
+
+// A .onion node without proxy goes through the environment's proxy, as
+// before per-endpoint proxies existed. net/http reads the environment once
+// per process, so `check` runs in a child process.
+func TestOnionNodeThroughEnvProxy(t *testing.T) {
+	if cfg := os.Getenv(envChild); cfg != "" {
+		code, out, errs := exec(t, "check", "-config", cfg)
+		fmt.Printf("CODE %d\n%s\n%s", code, out, errs)
+		os.Exit(0)
+	}
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	socks := newSOCKS5(t, w.srv.Listener.Addr().String())
+	cfg, _ := w.config(t)
+	b, _ := os.ReadFile(cfg)
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "url: "+w.srv.URL+"/rpc", "url: http://"+onion+":8332/rpc", 1)), 0o600)
+
+	cmd := osexec.Command(os.Args[0], "-test.run=^TestOnionNodeThroughEnvProxy$")
+	cmd.Env = append(os.Environ(), "http_proxy=", "NO_PROXY=", "no_proxy=", "REQUEST_METHOD=",
+		"HTTP_PROXY=socks5://"+socks.addr, envChild+"="+cfg)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "CODE 0\n") || !strings.Contains(string(out), "btc     OK     938266") {
+		t.Fatalf("check: %v\n%s", err, out)
+	}
+	if re := `btc +bitcoind:` + onion + `:8332 +socks5://` + socks.addr + ` \(environment\)\n`; !regexp.MustCompile(re).Match(out) {
+		t.Errorf("check output lacks %s:\n%s", re, out)
+	}
+	socks.mu.Lock()
+	defer socks.mu.Unlock()
+	if len(socks.dialed) != 1 || socks.dialed[0] != onion+":8332" {
+		t.Fatalf("proxy dialed %q, want only the node", socks.dialed)
 	}
 }
 
