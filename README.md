@@ -9,10 +9,10 @@
 
 **Get a Telegram message when your Bitcoin node falls behind the chain tip, and another when it catches up.**
 
-**Install:** the `.deb` on Debian, Ubuntu and Raspberry Pi OS,
-`brew install al-maisan/tap/node-tracker` on macOS; see [Install](#install)
-for these, the signed release archive (any Linux) and `go install`. Then
-follow the [Quick start](#quick-start).
+**Install:** the PPA on Ubuntu 26.04, COPR on Fedora, the `.deb` on
+Debian and Raspberry Pi OS, `brew install al-maisan/tap/node-tracker` on
+macOS; see [Install](#install) for these, the signed release archive (any
+Linux) and `go install`. Then follow the [Quick start](#quick-start).
 
 A node that has lost its peers, is eclipsed, or hangs after a crash often
 *looks* healthy: the process runs, the RPC port answers, and the node thinks
@@ -79,8 +79,28 @@ delivers this:
 
 The easiest way first:
 
-- **`.deb` package** (Debian, Ubuntu, Raspberry Pi OS; amd64, arm64,
-  armhf): download the `.deb` for your system from the
+- **Ubuntu 26.04** (amd64, arm64), from the PPA
+  [`ppa:al-maisan/node-tracker`](https://launchpad.net/~al-maisan/+archive/ubuntu/node-tracker):
+
+  ```sh
+  sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker
+  ```
+
+- **Fedora** (x86_64, aarch64), from COPR
+  [`al-maisan/node-tracker`](https://copr.fedorainfracloud.org/coprs/al-maisan/node-tracker/):
+
+  ```sh
+  sudo dnf copr enable al-maisan/node-tracker && sudo dnf install node-tracker
+  ```
+
+  Both packages install `/usr/bin/node-tracker` with its man page, the
+  systemd units (none is enabled) and a `node-tracker` system user, and get
+  updates with the system's (`apt upgrade`, `dnf upgrade`). The docs and
+  example config are in `/usr/share/doc/node-tracker`; see
+  [docs/operations.md](docs/operations.md#from-a-package) for the setup.
+
+- **`.deb` package** (Debian, Raspberry Pi OS, other Ubuntu releases;
+  amd64, arm64, armhf): download the `.deb` for your system from the
   [releases page](https://github.com/al-maisan/node-tracker/releases),
   together with `SHA256SUMS` and `SHA256SUMS.asc`, into one directory.
   [Verify it](#verify-a-download), then install it (example for `v1.1.0`
@@ -94,11 +114,9 @@ The easiest way first:
   accessed by user '_apt'`, that is harmless: your home directory is
   private, so apt reads the file as root.
 
-  It installs `/usr/bin/node-tracker` with its man page, the systemd units
-  (none is enabled) and a `node-tracker` system user. The docs and example
-  config are in `/usr/share/doc/node-tracker`; see
-  [docs/operations.md](docs/operations.md#from-a-package) for the setup.
-  `.deb` files ship from v1.1.0 on.
+  It installs the same as the PPA package, but updates are manual:
+  install the next release's `.deb` the same way. `.deb` files ship from
+  v1.1.0 on.
 
 - **Homebrew** (macOS, Linux amd64/arm64):
 
