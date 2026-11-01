@@ -60,8 +60,9 @@ delivers this:
   works.
 - **Secure by default.** Secrets come only from files or environment
   variables, never from the config file. Tokens are scrubbed from errors and
-  logs. Plain HTTP is allowed only to localhost. Tor/SOCKS5 proxies are
-  supported, and only the read-only `getblockchaininfo` RPC is used.
+  logs. Plain HTTP is allowed only to localhost and to `.onion` hosts
+  through a local Tor. Tor/SOCKS5 proxies are supported, per endpoint too,
+  and only the read-only `getblockchaininfo` RPC is used.
 - **One small static binary.** The Go standard library plus a YAML parser;
   no runtime and no database.
 

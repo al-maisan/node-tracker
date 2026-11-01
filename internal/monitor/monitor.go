@@ -30,7 +30,7 @@ type Target struct {
 type Monitor struct {
 	Targets     []Target
 	Notifiers   map[string]notify.Notifier
-	Timeout     time.Duration // per source call
+	Timeout     time.Duration // per source call, unless set with source.WithTimeout
 	Retry       notify.Retry
 	OutboxLimit int // pending events per notifier
 	Log         *slog.Logger
@@ -76,7 +76,7 @@ func (m *Monitor) Observe(ctx context.Context, d *state.Data) ([]Result, error) 
 
 func (m *Monitor) sample(ctx context.Context, t Target) health.Sample {
 	read := func(s source.Source) health.Reading {
-		cctx, cancel := context.WithTimeout(ctx, m.Timeout)
+		cctx, cancel := context.WithTimeout(ctx, source.Timeout(s, m.Timeout))
 		defer cancel()
 		h, err := s.Height(cctx)
 		if err != nil && ctx.Err() == nil { // don't log failures caused by shutdown

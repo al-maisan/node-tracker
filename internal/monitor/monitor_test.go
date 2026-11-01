@@ -181,6 +181,33 @@ func TestObserveIsReadOnly(t *testing.T) {
 	}
 }
 
+// deadline reports how long its context had left.
+type deadline struct {
+	name string
+	left *time.Duration
+}
+
+func (d deadline) Name() string { return d.name }
+func (d deadline) Height(ctx context.Context) (source.Height, error) {
+	dl, _ := ctx.Deadline()
+	*d.left = time.Until(dl)
+	return source.Height{Blocks: 1, Headers: 1}, nil
+}
+
+func TestPerSourceTimeout(t *testing.T) {
+	var tick int
+	var node, ref time.Duration
+	m := newMonitor(&tick, &recorder{})
+	m.Targets[0].Node = source.WithTimeout(deadline{"node", &node}, time.Hour)
+	m.Targets[0].Refs = []source.Source{deadline{"ref", &ref}}
+	if _, err := m.Observe(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if node <= time.Minute || ref > m.Timeout {
+		t.Fatalf("time left: node %s (own timeout 1h), ref %s (default %s)", node, ref, m.Timeout)
+	}
+}
+
 func TestBroadcast(t *testing.T) {
 	var tick int
 	ok, bad := &recorder{}, &recorder{fail: 1}

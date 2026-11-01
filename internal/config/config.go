@@ -4,10 +4,13 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha3"
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -27,17 +30,20 @@ const (
 	KindTelegram = "telegram"
 
 	DefaultTelegramAPI = "https://api.telegram.org"
+	DefaultTorProxy    = "socks5://127.0.0.1:9050" // proxy of .onion endpoints without one
 )
 
 var (
 	NodeKinds      = []string{KindBitcoind}
 	ReferenceKinds = []string{KindBitcoind, KindEsplora}
 	NotifierKinds  = []string{KindTelegram}
+	proxySchemes   = []string{"socks5", "socks5h", "http", "https"}
 )
 
 const (
 	defaultInterval = 30 * time.Second
 	defaultTimeout  = 10 * time.Second
+	onionTimeout    = 30 * time.Second // minimum per-call timeout for .onion hosts
 	defaultFor      = 2
 	defaultOutlier  = 6
 	maxFor          = 100
@@ -86,9 +92,12 @@ type Endpoint struct {
 	PasswordFile  string `yaml:"password_file"`
 	PasswordEnv   string `yaml:"password_env"`
 	AllowInsecure bool   `yaml:"allow_insecure"`
+	Proxy         string `yaml:"proxy"` // empty: from the environment; for .onion, DefaultTorProxy if the environment has none
 
-	Name     string `yaml:"-"` // derived: kind:host
-	Password Secret `yaml:"-"` // resolved from PasswordFile / PasswordEnv
+	Name         string        `yaml:"-"` // derived: kind:host
+	Password     Secret        `yaml:"-"` // resolved from PasswordFile / PasswordEnv
+	Timeout      time.Duration `yaml:"-"` // derived: per-call timeout of .onion hosts; 0 means Config.Timeout
+	DefaultProxy bool          `yaml:"-"` // derived: Proxy was set to DefaultTorProxy
 }
 
 // Alert holds the thresholds. Pointers tell "unset" from 0.
@@ -210,12 +219,12 @@ func (c *Config) validate(v *validator) {
 		}
 		targets[t.Name] = true
 
-		t.Node.validate(v, p+".node", NodeKinds)
+		t.Node.validate(v, p+".node", NodeKinds, c)
 		seen := map[string]bool{t.Node.URL: true}
 		for j := range t.References {
 			r := &t.References[j]
 			rp := fmt.Sprintf("%s.references[%d]", p, j)
-			r.validate(v, rp, ReferenceKinds)
+			r.validate(v, rp, ReferenceKinds, c)
 			if seen[r.URL] {
 				v.errf(rp+".url", "duplicate of the node or another reference")
 			}
@@ -241,16 +250,45 @@ func (c *Config) validate(v *validator) {
 	}
 }
 
-func (e *Endpoint) validate(v *validator, p string, kinds []string) {
+// validate checks e and sets its defaults. A .onion host without proxy uses
+// the environment's proxy for its URL, else DefaultTorProxy, and gets at
+// least 30s per call, capped at c.Interval.
+func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 	if !slices.Contains(kinds, e.Kind) {
 		v.bad(p+".kind", e.Kind, "must be one of %v", kinds)
 		return
+	}
+	var proxy *url.URL
+	if e.Proxy != "" {
+		proxy = checkProxy(v, p+".proxy", e.Proxy)
 	}
 	u := checkURL(v, p+".url", e.URL, e.AllowInsecure, true)
 	if u == nil {
 		return
 	}
 	e.Name = e.Kind + ":" + u.Host
+	if isOnion(u.Hostname()) {
+		e.Timeout = min(max(c.Timeout, onionTimeout), c.Interval)
+		from := ""
+		if e.Proxy == "" {
+			from = " (environment)"
+			var err error
+			if proxy, err = http.ProxyFromEnvironment(&http.Request{URL: u}); err != nil {
+				v.errf(p+".url", "invalid proxy in the environment (HTTP_PROXY / HTTPS_PROXY)")
+				return
+			}
+		}
+		if proxy == nil && e.Proxy == "" {
+			e.Proxy, e.DefaultProxy, from = DefaultTorProxy, true, ""
+			proxy, _ = url.Parse(DefaultTorProxy)
+		}
+		// Plain http is fine only up to a local proxy: from there, Tor
+		// encrypts. A remote proxy would see the RPC credentials.
+		if proxy != nil && u.Scheme == "http" && !e.AllowInsecure && !isLoopback(proxy.Hostname()) {
+			v.bad(p+".url", e.URL, "plain http to .onion needs a loopback proxy; %q%s would see the RPC credentials. Use a local Tor, or set allow_insecure: true if that network is trusted",
+				redactURL(proxy.String()), from)
+		}
+	}
 
 	switch e.Kind {
 	case KindBitcoind:
@@ -360,41 +398,76 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 	}
 }
 
-// checkURL validates an endpoint URL: absolute http(s), a valid host, no
-// credentials, and plain http only for loopback hosts unless allowInsecure.
-// endpoint is set for nodes and references, which have allow_insecure.
-// Errors show the URL with userinfo redacted, and never url.Parse's error
-// for raw, which quotes the input.
+// checkURL validates a URL: absolute http(s), a valid host, no credentials,
+// and plain http only for loopback hosts unless allowInsecure. endpoint is
+// set for nodes and references: they have allow_insecure, and plain http to
+// .onion hosts is fine for them through a local proxy (Tor encrypts; the
+// caller checks the proxy). Errors show the URL with userinfo redacted, and
+// never url.Parse's error for raw, which quotes the input.
 func checkURL(v *validator, p, raw string, allowInsecure, endpoint bool) *url.URL {
-	if raw == "" {
-		v.errf(p, "required")
+	u, shown := parseURL(v, p, raw, "add http:// or https://")
+	if u == nil {
 		return nil
 	}
-	shown := redactURL(raw)
-	if !schemeRE.MatchString(raw) {
-		v.bad(p, shown, "missing scheme; add http:// or https://")
-		return nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		v.bad(p, shown, "%s", parseError(shown))
-		return nil
-	}
+	host := u.Hostname()
 	switch {
 	case u.Scheme != "http" && u.Scheme != "https" || u.Host == "":
 		v.bad(p, shown, "must be an absolute http(s) URL")
 	case u.User != nil:
 		v.bad(p, shown, "must not contain credentials; use the auth fields")
-	case badHost(u.Hostname()) != "":
-		v.bad(p, shown, "%s", badHost(u.Hostname()))
-	case u.Scheme == "http" && !allowInsecure && !isLoopback(u.Hostname()) && endpoint:
-		v.bad(p, shown, "plain http is only allowed for loopback hosts; use https or set allow_insecure: true (e.g. LAN or Tor)")
-	case u.Scheme == "http" && !isLoopback(u.Hostname()):
+	case badHost(host) != "":
+		v.bad(p, shown, "%s", badHost(host))
+	case isOnion(host) && badOnion(host) != "":
+		v.bad(p, shown, "%s", badOnion(host))
+	case u.Scheme == "http" && !allowInsecure && !isLoopback(host) && endpoint && !isOnion(host):
+		v.bad(p, shown, "plain http is only allowed for loopback and .onion hosts; use https or set allow_insecure: true (e.g. LAN)")
+	case u.Scheme == "http" && !isLoopback(host) && !endpoint:
 		v.bad(p, shown, "plain http is only allowed for loopback hosts; use https")
 	default:
 		return u
 	}
 	return nil
+}
+
+// checkProxy validates a proxy URL: one of proxySchemes, a host and an
+// optional port, nothing else. Proxy credentials are not supported. It
+// returns nil if raw is invalid.
+func checkProxy(v *validator, p, raw string) *url.URL {
+	u, shown := parseURL(v, p, raw, "e.g. "+DefaultTorProxy)
+	switch {
+	case u == nil:
+	case !slices.Contains(proxySchemes, u.Scheme):
+		v.bad(p, shown, "scheme must be one of %v", proxySchemes)
+	case u.User != nil:
+		v.bad(p, shown, "must not contain credentials; proxy authentication is not supported")
+	case u.Host == "" || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "":
+		v.bad(p, shown, "must be scheme://host:port, e.g. %s", DefaultTorProxy)
+	case badHost(u.Hostname()) != "":
+		v.bad(p, shown, "%s", badHost(u.Hostname()))
+	default:
+		return u
+	}
+	return nil
+}
+
+// parseURL parses raw, or reports why it can't and returns nil. shown is raw
+// with userinfo redacted; example tells how to fix a missing scheme.
+func parseURL(v *validator, p, raw, example string) (u *url.URL, shown string) {
+	if raw == "" {
+		v.errf(p, "required")
+		return nil, ""
+	}
+	shown = redactURL(raw)
+	if !schemeRE.MatchString(raw) {
+		v.bad(p, shown, "missing scheme; %s", example)
+		return nil, shown
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		v.bad(p, shown, "%s", parseError(shown))
+		return nil, shown
+	}
+	return u, shown
 }
 
 // redactURL replaces userinfo with REDACTED. It works on unparsable input
@@ -416,7 +489,7 @@ func parseError(shown string) string {
 	if _, err := url.Parse(shown); errors.As(err, &ue) {
 		return ue.Err.Error()
 	}
-	return "invalid URL; credentials (user:pass@) are not allowed, use the auth fields"
+	return "invalid URL; credentials (user:pass@) are not allowed"
 }
 
 // badHost says why host is neither an IP address nor a DNS name, or "".
@@ -442,6 +515,25 @@ func expandHome(p string) string {
 		return p // the later stat/read reports the unusable path
 	}
 	return filepath.Join(home, p[2:])
+}
+
+func isOnion(host string) bool { return strings.HasSuffix(strings.ToLower(host), ".onion") }
+
+// badOnion says why the .onion host is not a valid v3 onion address, or "".
+// A v3 address is base32(pubkey[32] | checksum[2] | version 3), with
+// checksum = SHA3-256(".onion checksum" | pubkey | version)[:2], so typos
+// are caught here instead of as a Tor timeout.
+func badOnion(host string) string {
+	labels := strings.Split(strings.ToUpper(host), ".")
+	b, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(labels[len(labels)-2])
+	if err != nil || len(b) != 35 || b[34] != 3 {
+		return "not a v3 onion address (56 base32 characters before .onion)"
+	}
+	sum := sha3.Sum256(slices.Concat([]byte(".onion checksum"), b[:32], b[34:]))
+	if !bytes.Equal(sum[:2], b[32:34]) {
+		return "onion address checksum mismatch; check it for typos"
+	}
+	return ""
 }
 
 func isLoopback(host string) bool {

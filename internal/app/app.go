@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/al-maisan/node-tracker/internal/config"
@@ -80,10 +81,46 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 	return m, nil
 }
 
+// newSource uses hc, or its own client if e has a proxy.
 func newSource(e config.Endpoint, hc *http.Client) (source.Source, error) {
 	mk, ok := sources[e.Kind]
 	if !ok {
 		return nil, fmt.Errorf("source kind %q not implemented", e.Kind)
 	}
-	return mk(e, hc), nil
+	if e.Proxy != "" {
+		u, err := url.Parse(e.Proxy)
+		if err != nil {
+			return nil, fmt.Errorf("%s: invalid proxy", e.Name)
+		}
+		hc = httpx.NewProxyClient(u)
+	}
+	s := mk(e, hc)
+	if e.Timeout > 0 {
+		s = source.WithTimeout(s, e.Timeout)
+	}
+	return s, nil
+}
+
+// Proxy describes the proxy e's requests go through: e.Proxy (marked if it
+// is the .onion default), the one from the environment (scheme and host
+// only, it may hold credentials), or "none".
+func Proxy(e config.Endpoint) string {
+	switch {
+	case e.DefaultProxy:
+		return e.Proxy + " (default)"
+	case e.Proxy != "":
+		return e.Proxy
+	}
+	req, err := http.NewRequest(http.MethodGet, e.URL, nil)
+	if err != nil {
+		return "none"
+	}
+	u, err := http.ProxyFromEnvironment(req)
+	switch {
+	case err != nil:
+		return "invalid (environment)"
+	case u == nil:
+		return "none"
+	}
+	return httpx.Origin(u.String()) + " (environment)"
 }
