@@ -28,7 +28,8 @@ type tokenChecker interface {
 
 // check prints the observed state of every target with hints for node
 // errors, the proxies if any endpoint uses one (or at debug level), and a
-// verdict on the setup.
+// verdict on the setup. It warns about references on another chain than
+// the node's.
 func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Writer, log *slog.Logger) int {
 	samples, err := m.Sample(ctx)
 	if err != nil {
@@ -36,6 +37,14 @@ func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Wri
 		return exitFailure
 	}
 	res := m.Classify(samples, nil)
+	for i, s := range samples {
+		for _, r := range s.Refs {
+			if health.MismatchedChain(s.Node, r) {
+				log.Warn("reference is on another chain than the node, so it is ignored; set references for the node's chain (see docs/configuration.md)",
+					"target", cfg.Targets[i].Name, "node_chain", s.Node.Chain, "reference", r.Source, "reference_chain", r.Chain)
+			}
+		}
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "TARGET\tSTATE\tNODE\tTIP\tLAG\tTIP FROM\tERROR")
 	for i, r := range res {
@@ -91,7 +100,7 @@ func targetVerdict(t config.Target, s health.Sample, r monitor.Result) string {
 	}
 	ok := 0
 	for _, ref := range s.Refs {
-		if ref.Err == nil {
+		if ref.Err == nil && !health.MismatchedChain(s.Node, ref) {
 			ok++
 		}
 	}

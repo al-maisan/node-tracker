@@ -30,7 +30,7 @@ var sources = map[string]func(config.Endpoint, *http.Client) source.Source{
 		}, hc)
 	},
 	config.KindEsplora: func(e config.Endpoint, hc *http.Client) source.Source {
-		return esplora.New(e.Name, e.URL, hc)
+		return esplora.New(e.Name, e.URL, config.ReferenceChain(e), hc)
 	},
 }
 

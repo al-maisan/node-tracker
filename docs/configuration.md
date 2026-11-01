@@ -27,7 +27,7 @@ node-tracker: /home/me/.config/node-tracker/config.yaml: invalid config:
 notifiers[0].chat_id "<chat id>": must be a numeric chat id or @channelname; this looks like a placeholder
 notifiers[0].bot_token_env: environment variable NOPE_UNSET is not set or empty
 targets[0].node.url "http://$ONION:8332": invalid character "$" in host name; YAML does not expand environment variables
-targets[0].alert.threshold: required (lag in blocks)
+targets[0].alert.recover_threshold: must not exceed threshold (3)
 ```
 
 Errors show the rejected value, with a hint for common mistakes (`$VAR`,
@@ -37,6 +37,84 @@ Errors show the rejected value, with a hint for common mistakes (`$VAR`,
 Run `node-tracker check` after each change.
 
 A commented example is in [examples/config.yaml](../examples/config.yaml).
+
+## Minimal config
+
+For a bitcoind on the same machine, this is enough:
+
+```yaml
+# ~/.config/node-tracker/config.yaml
+targets:
+  - name: my-node
+notifiers:
+  - name: telegram
+    kind: telegram
+    bot_token_file: ~/.config/node-tracker/telegram-token
+    chat_id: "123456789"
+```
+
+What a target leaves out gets a default:
+
+- `node`: the local bitcoind, see [Auto-detection](#auto-detection).
+- `references`: public Esplora APIs of the node's chain:
+
+  | Chain | References |
+  |---|---|
+  | main | `https://mempool.space/api`, `https://blockstream.info/api` |
+  | test (testnet3) | `https://mempool.space/testnet/api` |
+  | testnet4 | `https://mempool.space/testnet4/api` |
+  | signet | `https://mempool.space/signet/api` |
+  | regtest | none |
+
+  The chain is the detected one if `node` is left out, else the one whose
+  default RPC port the node's URL uses (mainnet for any other port).
+  `references: []` means none. These are queried over clearnet (or your
+  proxy), and `run` and `check` log `using public references` at startup;
+  for a Tor-only setup, set `references` yourself.
+- `alert`: the balanced preset, `threshold: 3`, `recover_threshold: 1`,
+  `for: 2` (see [Choosing the thresholds](#choosing-the-thresholds)).
+- `notify`: every notifier.
+
+A value you set is used as it is.
+
+### Auto-detection
+
+A target without `node` watches `http://127.0.0.1:<port>` with a cookie.
+node-tracker reads the first readable `bitcoin.conf` of these datadirs
+and finds the cookie in the first of them that has a readable one:
+
+1. `$BITCOIN_DATADIR`
+2. `~/.bitcoin`
+3. `~/Library/Application Support/Bitcoin` (macOS)
+4. `~/snap/bitcoin-core/common/.bitcoin`
+5. `/var/lib/bitcoind`, with its config in `/etc/bitcoin/bitcoin.conf`
+
+Without a home (`HOME` unset or `/`, as for the system service), 2–4 are
+skipped. `install-service -system` checks the config the same way, with
+5 only, as the service account will see it.
+
+From `bitcoin.conf` it reads only the chain (`chain=`, `testnet=1`,
+`testnet4=1`, `signet=1`, `regtest=1`), `datadir=`, `rpcport=` and
+`rpccookiefile=`, in sections such as `[signet]` too. Credentials are
+never read. The port is `rpcport`, else the chain's default: 8332 (main),
+18332 (test), 48332 (testnet4), 38332 (signet), 18443 (regtest). The cookie
+is in the chain's subdirectory, e.g. `~/.bitcoin/signet/.cookie`. If no
+cookie is readable, the most likely path is used, and `check` shows why
+it fails (missing, or permission denied).
+
+`run` and `check` log the result at start (`once`, `report` and
+`test-notify` only at `-log-level debug`):
+
+```text
+level=INFO msg="detected local bitcoind" conf=/home/me/.bitcoin/bitcoin.conf chain=signet url=http://127.0.0.1:38332 cookie_file=/home/me/.bitcoin/signet/.cookie
+```
+
+For a node elsewhere, or another port or auth, set `node`.
+
+A reference on another chain than the node (from `getblockchaininfo`)
+counts as failed, and `check` warns about it. node-tracker knows the chain
+of mempool.space and blockstream.info and of URLs with `/testnet`,
+`/testnet4` or `/signet` in the path.
 
 ## Paths and secrets
 
@@ -71,15 +149,15 @@ Durations use Go syntax: `90s`, `5m`, `1h30m`.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `name` | string | *required* | Unique. 1–64 of `A–Z a–z 0–9 . _ -`. Shown in alerts. |
-| `node` | endpoint | *required* | The node being watched. Kinds: `bitcoind`. |
-| `references` | list of endpoints | none | Independent views of the chain tip. Kinds: `esplora`, `bitcoind`. |
+| `node` | endpoint | the [local bitcoind](#auto-detection) | The node being watched. Kinds: `bitcoind`. |
+| `references` | list of endpoints | [by chain](#minimal-config) | Independent views of the chain tip. Kinds: `esplora`, `bitcoind`. `[]` for none. |
 | `reference_outlier` | integer | `6` | With 3+ responding references, a reference more than this many blocks above all the others is ignored (and logged). `0` turns it off. |
-| `alert.threshold` | integer | *required* | `LAGGING` when lag **>** this many blocks. |
-| `alert.recover_threshold` | integer | `threshold` | Back to `OK` when lag **≤** this. Must be ≤ `threshold`. |
+| `alert.threshold` | integer | `3` | `LAGGING` when lag **>** this many blocks. |
+| `alert.recover_threshold` | integer | `threshold`; `1` if `threshold` is left out too | Back to `OK` when lag **≤** this. Must be ≤ `threshold`. |
 | `alert.for` | integer | `2` | Ticks in a row a change must be seen before the state changes (1–100). Bad states count together: `LAGGING, NODE_DOWN` leaves `OK` just like `LAGGING, LAGGING`, and the target takes the latest state. Returning to `OK` needs this many `OK` ticks in a row. |
-| `notify` | list of names | *required* | Notifiers that get this target's alerts. |
+| `notify` | list of names | every notifier | Notifiers that get this target's alerts. |
 
-**References:** without any, lag is measured against the node's own header
+**References:** without any (`references: []`, or on regtest), lag is measured against the node's own header
 height only. That catches a node that is stuck validating, but not a node
 that has lost contact with the network. A warning is logged in that case.
 Two independent references are a good default, three are better. The tip

@@ -98,7 +98,7 @@ func (m *Monitor) sample(ctx context.Context, t Target) health.Sample {
 		if err != nil && ctx.Err() == nil { // don't log failures caused by shutdown
 			m.Log.Warn("source failed", "target", t.Name, "source", s.Name(), "err", err)
 		}
-		return health.Reading{Source: s.Name(), Blocks: h.Blocks, Headers: h.Headers, Err: err}
+		return health.Reading{Source: s.Name(), Blocks: h.Blocks, Headers: h.Headers, Chain: h.Chain, Err: err}
 	}
 	s := health.Sample{Refs: make([]health.Reading, len(t.Refs))}
 	var wg sync.WaitGroup

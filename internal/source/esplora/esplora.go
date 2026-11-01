@@ -17,14 +17,16 @@ const maxBody = 32 // a decimal height
 
 // Client queries GET {base}/blocks/tip/height.
 type Client struct {
-	name string
-	url  string
-	http *http.Client
+	name  string
+	url   string
+	chain string
+	http  *http.Client
 }
 
-// New returns a client for the API rooted at base (e.g. https://mempool.space/api).
-func New(name, base string, hc *http.Client) *Client {
-	return &Client{name: name, url: strings.TrimRight(base, "/") + "/blocks/tip/height", http: hc}
+// New returns a client for the API rooted at base (e.g. https://mempool.space/api)
+// on chain ("" if unknown), which Height reports, as Esplora doesn't.
+func New(name, base, chain string, hc *http.Client) *Client {
+	return &Client{name: name, url: strings.TrimRight(base, "/") + "/blocks/tip/height", chain: chain, http: hc}
 }
 
 func (c *Client) Name() string { return c.name }
@@ -50,5 +52,5 @@ func (c *Client) Height(ctx context.Context) (source.Height, error) {
 	if err != nil {
 		return source.Height{}, err
 	}
-	return source.Height{Blocks: h, Headers: h}, nil
+	return source.Height{Blocks: h, Headers: h, Chain: c.chain}, nil
 }

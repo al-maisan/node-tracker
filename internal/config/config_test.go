@@ -109,7 +109,6 @@ func TestInvalid(t *testing.T) {
 		{"plain http reference", "https://mempool.space/api", "http://mempool.space/api", "only allowed for loopback"},
 		{"no auth", "      cookie_file: COOKIEFILE\n", "", "auth required"},
 		{"user without password", "cookie_file: COOKIEFILE", "username: u", "password: set password_file or password_env"},
-		{"missing threshold", "      threshold: 3", "      for: 2", "threshold: required"},
 		{"recover above threshold", "threshold: 3", "threshold: 3\n      recover_threshold: 4", "must not exceed"},
 		{"unknown notifier", "notify: [ops]", "notify: [nope]", `unknown notifier "nope"`},
 		{"bad chat id", `"-1001234567890"`, `"x y"`, "chat_id"},
@@ -378,15 +377,15 @@ func TestOnionTimeout(t *testing.T) {
 }
 
 func TestAllErrorsReported(t *testing.T) {
-	cfg := strings.NewReplacer("threshold: 3", "for: 2", `"-1001234567890"`, `"x y"`).Replace(valid)
+	cfg := strings.NewReplacer("threshold: 3", "threshold: 3\n      recover_threshold: 4", `"-1001234567890"`, `"x y"`).Replace(valid)
 	_, _, err := Load(write(t, cfg))
-	if err == nil || !strings.Contains(err.Error(), "threshold") || !strings.Contains(err.Error(), "chat_id") {
+	if err == nil || !strings.Contains(err.Error(), "recover_threshold") || !strings.Contains(err.Error(), "chat_id") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestWarnings(t *testing.T) {
-	path := write(t, strings.Replace(valid, "    references:\n      - kind: esplora\n        url: https://mempool.space/api\n", "", 1))
+	path := write(t, strings.Replace(valid, "    references:\n      - kind: esplora\n        url: https://mempool.space/api\n", "    references: []\n", 1))
 	os.Chmod(filepath.Join(filepath.Dir(path), "token"), 0o644)
 	_, warns, err := Load(path)
 	if err != nil {

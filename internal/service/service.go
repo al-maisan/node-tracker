@@ -62,6 +62,7 @@ type Host struct {
 	EtcDir        string // system config and secrets
 	SystemUnitDir string
 	PackagedDirs  map[bool]string // packaged units, by Options.System
+	ServiceEnv    config.Env      // where the system service detects the local bitcoind
 }
 
 // NewHost is the real machine.
@@ -77,6 +78,7 @@ func NewHost(stdout, stderr io.Writer) Host {
 		EtcDir:        "/etc/node-tracker",
 		SystemUnitDir: "/etc/systemd/system",
 		PackagedDirs:  map[bool]string{true: "/usr/lib/systemd/system", false: "/usr/lib/systemd/user"},
+		ServiceEnv:    config.ServiceEnv(),
 	}
 }
 
@@ -299,9 +301,14 @@ func (in *installer) account(ctx context.Context) error {
 	return nil
 }
 
-// loadConfig validates the config the service will use.
+// loadConfig validates the config the service will use, detecting the
+// local bitcoind as the service will: the system service has no home.
 func (in *installer) loadConfig(path string) (*config.Config, error) {
-	cfg, warns, err := config.Load(path)
+	env := config.SystemEnv()
+	if in.o.System {
+		env = in.h.ServiceEnv
+	}
+	cfg, warns, err := config.LoadEnv(path, env)
 	for _, w := range warns {
 		fmt.Fprintf(in.h.Out, "config warning: %s\n", w)
 	}

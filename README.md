@@ -133,7 +133,8 @@ delivers this:
 
 3. **Configure.** Copy [examples/config.yaml](examples/config.yaml) to
    `~/.config/node-tracker/config.yaml`, then set your node's URL,
-   `cookie_file` and `chat_id`.
+   `cookie_file` and `chat_id`. For a local bitcoind, the
+   [minimal config](docs/configuration.md#minimal-config) is 8 lines.
 
 4. **Check** that everything is reachable:
 

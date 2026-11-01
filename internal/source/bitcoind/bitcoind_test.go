@@ -45,6 +45,8 @@ func TestHeight(t *testing.T) {
 		wantErr string
 	}{
 		{"ok", 200, `{"result":{"blocks":945000,"headers":945002},"error":null,"id":"x"}`, auth, source.Height{Blocks: 945000, Headers: 945002}, ""},
+		{"chain", 200, `{"result":{"chain":"signet","blocks":1,"headers":2}}`, auth, source.Height{Blocks: 1, Headers: 2, Chain: "signet"}, ""},
+		{"junk chain", 200, `{"result":{"chain":"<b>x</b>","blocks":1,"headers":2}}`, auth, source.Height{Blocks: 1, Headers: 2}, ""},
 		{"bad auth", 200, ``, Auth{Username: "u", Password: "wrong"}, source.Height{}, "auth failed"},
 		{"rpc error on HTTP 500", 500, `{"result":null,"error":{"code":-28,"message":"Loading block index"}}`, auth, source.Height{}, "Loading block index"},
 		{"junk on HTTP 503", 503, `<html>`, auth, source.Height{}, "HTTP 503"},

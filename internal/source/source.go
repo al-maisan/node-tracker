@@ -16,6 +16,7 @@ const MaxHeight = 1_000_000_000
 type Height struct {
 	Blocks  uint64 // fully validated blocks
 	Headers uint64 // best known header; equal to Blocks if the source has no such notion
+	Chain   string // e.g. "main" or "signet", if the source reports it
 }
 
 // Source reports a block height. Implementations must be safe for
