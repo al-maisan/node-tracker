@@ -52,7 +52,22 @@ orendil  LAGGING  974079  974085  6    esplora:mempool.space
 
 ## Quick start
 
-1. **Install** (Go 1.26+):
+1. **Install.** Download the archive for your system (Linux amd64, arm64,
+   armv7 for Raspberry Pi; macOS amd64, arm64) from the
+   [releases page](https://github.com/al-maisan/node-tracker/releases),
+   together with `SHA256SUMS` and `SHA256SUMS.asc`. Verify and unpack it
+   (example for `v1.0.0` on Linux amd64):
+
+   ```sh
+   curl -s https://github.com/al-maisan.gpg | gpg --import && gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | grep -q '^\[GNUPG:\] VALIDSIG .* 753B6ECF2B458FF3D19D568C1E0A288397AE739E$' && sha256sum --ignore-missing -c SHA256SUMS && tar -xzf node-tracker_1.0.0_linux_amd64.tar.gz
+   ```
+
+   The `grep` only passes for a good signature from the release key
+   `753B 6ECF 2B45 8FF3 D19D 568C 1E0A 2883 97AE 739E`. On macOS use
+   `shasum -a 256 --ignore-missing -c SHA256SUMS`. The archive holds the
+   binary, this README, the docs, the systemd units and an example config.
+
+   Or, with Go 1.26+:
 
    ```sh
    go install github.com/al-maisan/node-tracker/cmd/node-tracker@latest
@@ -163,4 +178,4 @@ Report security problems privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-[GPL-3.0](LICENSE)
+[GPL-3.0-only](LICENSE): GNU General Public License, version 3 only.

@@ -394,4 +394,5 @@ because a person reads them.
 - Container image
 - Windows support (the state lock uses `flock`)
 
-Packaging and release automation are tracked in issue #8.
+Release archives and signed checksums: `make dist` / `make release`, see
+CONTRIBUTING.md. Other packaging (Homebrew, AUR) is tracked in issue #8.
