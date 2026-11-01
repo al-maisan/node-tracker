@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -365,7 +367,7 @@ func TestSetupOnionNode(t *testing.T) {
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "Chat id or @channel: ", answer: "666"},
 		turn{prompt: "Chat id or @channel: ", answer: "@mychannel"},
-		turn{prompt: "Replace them, keeping each as .bak? [y/N] ", answer: "y"},
+		turn{prompt: "Replace them (the old config is kept as .bak, old secrets are not)? [y/N] ", answer: "y"},
 		turn{prompt: "Install and start the systemd service now (node-tracker install-service -user -config ", answer: "n"},
 	)
 	_, installs := fakeSetup(t, tg, ft)
@@ -465,8 +467,14 @@ func TestSetupNonInteractive(t *testing.T) {
 	if code, errs := runSetup(context.Background(), io.Discard, args...); code != exitUsage || !strings.Contains(errs, "exist and differ; rerun with -force") || read(t, path) != before {
 		t.Errorf("changed config without -force: code=%d\n%s", code, errs)
 	}
+	tok := filepath.Join(h.etcDir, "telegram-token")
+	os.WriteFile(tok, []byte("123:OLD-LEAKED\n"), 0o640)
 	if code, errs := runSetup(context.Background(), io.Discard, append(args, "-force")...); code != exitOK || read(t, path+".bak") != before || !strings.Contains(read(t, path), `chat_id: "43"`) {
 		t.Errorf("-force: code=%d\n%s", code, errs)
+	}
+	// A replaced secret is not kept: it may be the reason for the change.
+	if _, err := os.Lstat(tok + ".bak"); !errors.Is(err, fs.ErrNotExist) || read(t, tok) != tgToken+"\n" {
+		t.Errorf("token .bak: %v, token %q", err, read(t, tok))
 	}
 
 	os.WriteFile(tokSrc, []byte("123:WRONG\n"), 0o600)
@@ -486,6 +494,29 @@ func TestSetupNonInteractive(t *testing.T) {
 	}
 	if !strings.Contains(read(t, path), `chat_id: "43"`) {
 		t.Error("a failed run changed the config")
+	}
+}
+
+// As root, the config and its secrets must go in /etc/node-tracker: that is
+// the only place install-service -system takes secrets from.
+func TestSetupRootConfigOutsideEtc(t *testing.T) {
+	h, _ := fakeSetup(t, newFakeTG(t), nil)
+	h.euid = 0
+	tok := filepath.Join(t.TempDir(), "tok")
+	os.WriteFile(tok, []byte(tgToken+"\n"), 0o600)
+	elsewhere := filepath.Join(t.TempDir(), "config.yaml")
+	code, errs := runSetup(context.Background(), io.Discard, "setup", "-non-interactive", "-config", elsewhere, "-token-file", tok, "-chat-id", "42")
+	if code != exitUsage || !strings.Contains(errs, "as root, setup writes the system service's config, which goes in "+h.etcDir) {
+		t.Fatalf("code=%d\n%s", code, errs)
+	}
+	if _, err := os.Stat(elsewhere); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("wrote %s: %v", elsewhere, err)
+	}
+	// In the service's directory it is fine, under any name.
+	h2, _ := fakeSetup(t, newFakeTG(t), nil)
+	h2.euid = 0
+	if code, errs := runSetup(context.Background(), io.Discard, "setup", "-non-interactive", "-config", filepath.Join(h2.etcDir, "other.yaml"), "-token-file", tok, "-chat-id", "42"); strings.Contains(errs, "as root, setup writes") {
+		t.Errorf("code=%d\n%s", code, errs)
 	}
 }
 

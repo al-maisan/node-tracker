@@ -52,7 +52,7 @@ cookie. For a node elsewhere add `-node-url`, and `-cookie-file`, or
 9050, `-proxy socks5://127.0.0.1:9150`. `-references` (comma-separated
 Esplora API URLs, or `none`), `-preset fast|balanced|quiet` and `-name`
 are optional. A file that exists and differs is replaced only with
-`-force`, keeping a `.bak`. The node and references are tested and a test
+`-force`, keeping the old config (not old secrets) as `.bak`. The node and references are tested and a test
 message is sent, but only a bot token that Telegram rejects stops it, as
 the node or the network may not be up yet. `node-tracker setup -h` lists
 the flags.

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"regexp"
@@ -24,6 +25,7 @@ var chainRE = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 // Auth supplies RPC credentials. Exactly one way must be set.
 type Auth struct {
 	CookieFile string // re-read on every call: bitcoind rewrites it on restart
+	HideCookie bool   // CookieFile may be a pasted secret: keep it out of errors
 	Username   string
 	Password   string
 }
@@ -127,14 +129,22 @@ func (c *Client) credentials() (user, pass string, err error) {
 	if c.auth.CookieFile == "" {
 		return c.auth.Username, c.auth.Password, nil
 	}
+	// The content is never echoed, nor the path if it may be a secret.
+	shown := c.auth.CookieFile
+	if c.auth.HideCookie {
+		shown = "(path not shown: it may be the secret itself)"
+	}
 	b, err := os.ReadFile(c.auth.CookieFile)
 	if err != nil {
-		// The path is not secret; the content is never echoed.
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			return "", "", fmt.Errorf("read cookie file %s: %w", shown, pe.Err)
+		}
 		return "", "", fmt.Errorf("read cookie file: %w", err)
 	}
 	user, pass, ok := strings.Cut(strings.TrimSpace(string(b)), ":")
 	if !ok || user == "" || pass == "" {
-		return "", "", fmt.Errorf("cookie file %s: malformed", c.auth.CookieFile)
+		return "", "", fmt.Errorf("cookie file %s: malformed", shown)
 	}
 	return user, pass, nil
 }

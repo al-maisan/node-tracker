@@ -655,3 +655,23 @@ func TestInstallSystemPackaged(t *testing.T) {
 		t.Fatalf("config not installed or timer not enabled: %q", e.cmd.calls)
 	}
 }
+
+// A secret from the environment is only a warning, which names the drop-in
+// that can supply it: the unit doesn't get the shell's environment.
+func TestEnvSecretWarning(t *testing.T) {
+	e := newEnv(t)
+	rootExe(t, e)
+	t.Setenv("NT_TEST_TOKEN", "123:abc")
+	src := filepath.Join(e.conf, "node-tracker", "config.yaml")
+	write(t, src, strings.Replace(testConfig("x", e.cookie), "bot_token_file: x", "bot_token_env: NT_TEST_TOKEN", 1), 0o600)
+	for _, system := range []bool{false, true} {
+		e.out.Reset()
+		if err := Install(context.Background(), e.h, Options{System: system, DryRun: true, Config: src}); err != nil {
+			t.Fatalf("system=%v: %v", system, err)
+		}
+		edit := map[bool]string{false: "systemctl --user edit node-tracker", true: "systemctl edit node-tracker"}[system]
+		if want := "notifiers[0].bot_token_env: the service does not get this shell's environment; use bot_token_file, or set the variable in a drop-in (" + edit + ": Environment= or EnvironmentFile=)"; !strings.Contains(e.out.String(), want) {
+			t.Errorf("system=%v: no %q in\n%s", system, want, e.out.String())
+		}
+	}
+}

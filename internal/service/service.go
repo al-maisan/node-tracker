@@ -316,14 +316,19 @@ func (in *installer) loadConfig(path string) (*config.Config, error) {
 	if err != nil {
 		return nil, UsageError{err}
 	}
+	// Not an error: a drop-in may set the variable.
+	edit := "systemctl --user edit node-tracker"
+	if in.o.System {
+		edit = "systemctl edit node-tracker"
+	}
 	for i, n := range cfg.Notifiers {
 		if n.BotTokenEnv != "" {
-			fmt.Fprintf(in.h.Out, "config warning: notifiers[%d].bot_token_env: the service does not get this shell's environment; use bot_token_file\n", i)
+			fmt.Fprintf(in.h.Out, "config warning: notifiers[%d].bot_token_env: the service does not get this shell's environment; use bot_token_file, or set the variable in a drop-in (%s: Environment= or EnvironmentFile=), or the service won't start\n", i, edit)
 		}
 	}
 	for _, e := range endpoints(cfg) {
 		if e.PasswordEnv != "" {
-			fmt.Fprintf(in.h.Out, "config warning: %s: password_env: the service does not get this shell's environment; use password_file\n", e.Name)
+			fmt.Fprintf(in.h.Out, "config warning: %s: password_env: the service does not get this shell's environment; use password_file, or set the variable in a drop-in (%s: Environment= or EnvironmentFile=), or the service won't start\n", e.Name, edit)
 		}
 	}
 	return cfg, nil

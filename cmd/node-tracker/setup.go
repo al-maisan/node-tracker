@@ -138,7 +138,7 @@ func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&o.tokenFile, "token-file", "", "file holding the Telegram bot token (required)")
 	fs.StringVar(&o.chatID, "chat-id", "", "Telegram chat id or @channel (required)")
 	fs.BoolVar(&o.installService, "install-service", false, "then run install-service (-user, or -system as root)")
-	fs.BoolVar(&o.force, "force", false, "replace existing files, keeping a .bak")
+	fs.BoolVar(&o.force, "force", false, "replace existing files, keeping the old config as .bak")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -222,6 +222,11 @@ func (w *wizard) run(ctx context.Context) (int, error) {
 	root := w.euid == 0 && w.goos != "darwin"
 	w.root = root
 	path := w.o.config
+	// install-service -system takes secrets only from etcDir, and setup
+	// puts them next to the config.
+	if root && path != "" && filepath.Dir(path) != filepath.Clean(w.etcDir) {
+		return exitUsage, fmt.Errorf("-config %s: as root, setup writes the system service's config, which goes in %s; leave out -config, or run setup as your user", path, w.etcDir)
+	}
 	if path == "" {
 		path = filepath.Join(w.etcDir, "config.yaml")
 		if !root {
@@ -979,7 +984,8 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 		case bytes.Equal(old, f.data):
 			f.same = true
 		default:
-			f.bak = true
+			// Only the config is kept: an old secret may be one that leaked.
+			f.bak = i == len(files)-1
 			exist = append(exist, f.path)
 		}
 	}
@@ -988,10 +994,10 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 		fmt.Fprintf(w.out, "%s goes to %s (mode %04o).\n", upper(f.what), f.path, mode)
 	}
 	if len(exist) > 0 {
-		q := fmt.Sprintf("These files exist and differ: %s. Replace them, keeping each as .bak?", strings.Join(exist, ", "))
+		q := fmt.Sprintf("These files exist and differ: %s. Replace them (the old config is kept as .bak, old secrets are not)?", strings.Join(exist, ", "))
 		if w.o.nonInteractive {
 			if !w.o.force {
-				return exitUsage, fmt.Errorf("%s exist and differ; rerun with -force to replace them (keeps .bak copies)", strings.Join(exist, ", "))
+				return exitUsage, fmt.Errorf("%s exist and differ; rerun with -force to replace them (keeps the old config as .bak)", strings.Join(exist, ", "))
 			}
 		} else if ok, err := w.yes(ctx, q, false); err != nil || !ok {
 			return exitFailure, cmp.Or(err, errDeclined)

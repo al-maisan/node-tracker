@@ -341,7 +341,10 @@ are set are used as they are.
   secret: the bot token shows as its last 4 characters. Secrets go to
   `0600` files (`0640` group `node-tracker` as root), written atomically
   through a new `O_EXCL` temporary file; existing files are replaced only
-  after a confirmation and kept as `.bak`. Every answer goes through the
+  after a confirmation; the old config is kept as `.bak`, an old secret
+  is not (it may be the one that leaked). As root, the config and its
+  secrets go in `/etc/node-tracker`, where `install-service -system` takes
+  them from. Every answer goes through the
   config validation, and the whole config through `config.Load` before it
   is written. The chat id comes from a `/start` link with a random 16-byte
   code, matched exactly, so stale updates and other users can't inject a
