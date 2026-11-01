@@ -19,7 +19,9 @@ cp "$SRC/bin/node-tracker" "$WORK/"
 cp "$DEMO/config.yaml" "$DEMO/demo.tape" "$WORK/"
 chmod 755 "$WORK" && chmod 644 "$WORK"/*.yaml "$WORK"/*.tape
 
-docker run --rm --network none -v "$WORK:/vhs" -w /vhs ghcr.io/charmbracelet/vhs demo.tape
+# vhs v0.12.1, pinned: its output is committed.
+VHS=ghcr.io/charmbracelet/vhs@sha256:ea49a6a1c529be83153e88321892b5585964418f0b9055e8c1e0d732194234a3
+docker run --rm --network none -v "$WORK:/vhs" -w /vhs "$VHS" demo.tape
 
 cat "$WORK/telegram.log"
 grep -q 'node-tracker test message' "$WORK/telegram.log" && grep -q 'orendil is lagging' "$WORK/telegram.log" ||
