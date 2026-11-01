@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 6 116 104" width="116" height="104" role="img" aria-labelledby="t">
+  <title id="t">node-tracker: how far your node is behind the chain tip</title>
+  <g fill="none" stroke-width="12" stroke-linecap="round">
+    <path d="M28.6 99.4A50 50 0 0 1 64 14" stroke="#d0d7de"/>
+    <path d="M64 14A50 50 0 0 1 99.4 99.4" stroke="#f7931a"/>
+  </g>
+  <path d="M64 64 92 40" stroke="#f7931a" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="11" fill="#f7931a"/>
+</svg>

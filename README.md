@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="node-tracker logo: a gauge showing how far the node is behind the chain tip" width="116">
+  </picture>
+</p>
+
 # node-tracker
 
 **Get a Telegram message when your Bitcoin node falls behind the chain tip, and another when it catches up.**

@@ -28,7 +28,7 @@ for t in "${targets[@]}"; do
 	echo "dist: $name"
 	GOOS=$os GOARCH=$goarch GOARM=$goarm \
 		go build -trimpath -ldflags "$LDFLAGS" -o "$stage/node-tracker" ./cmd/node-tracker
-	cp -R README.md LICENSE deploy docs "$stage/"
+	cp -R README.md LICENSE assets deploy docs "$stage/"
 	cp examples/config.yaml "$stage/examples/"
 	tar --sort=name --owner=0 --group=0 --numeric-owner --mode=go-w,a+rX \
 		--mtime="@$mtime" -C dist -cf - "$name" | gzip -9n >"$stage.tar.gz"
