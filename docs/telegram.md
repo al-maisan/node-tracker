@@ -25,7 +25,7 @@ Save the token in a file only you can read (`cat` waits for the token:
 paste it, press Enter, then Ctrl-D):
 
 ```sh
-mkdir -p ~/.config/node-tracker && (umask 077 && cat > ~/.config/node-tracker/telegram-token)
+mkdir -p ~/.config/node-tracker && rm -f ~/.config/node-tracker/telegram-token && (umask 077 && cat > ~/.config/node-tracker/telegram-token)
 ```
 
 ## 2. Find the chat id

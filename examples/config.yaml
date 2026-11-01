@@ -24,8 +24,9 @@ targets:
       kind: bitcoind
       url: http://127.0.0.1:8332
       # Bitcoin Core writes this file on start; the user running
-      # node-tracker needs read access to it.
-      cookie_file: /var/lib/bitcoind/.cookie
+      # node-tracker needs read access to it. For a packaged bitcoind
+      # (e.g. the system service): /var/lib/bitcoind/.cookie
+      cookie_file: ~/.bitcoin/.cookie
       # Or rpcauth credentials (never put the password itself here):
       # username: tracker
       # password_file: /etc/node-tracker/rpc-password
