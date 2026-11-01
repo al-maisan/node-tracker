@@ -49,6 +49,15 @@ or to all notifiers.
 .B version
 Print the version, commit, build time and Go version.
 .TP
+.B install\-service
+Write and enable the systemd unit that runs this binary, then start it;
+see
+.B INSTALL\-SERVICE OPTIONS
+below.
+The configuration is validated first, and a changed unit or configuration
+is only replaced with
+.BR \-force .
+.TP
 .B help
 Print a short usage message.
 .SH OPTIONS
@@ -95,6 +104,53 @@ Logs go to standard error.
 .B warn
 or
 .BR error .
+.SH INSTALL\-SERVICE OPTIONS
+Exactly one of
+.B \-user
+and
+.B \-system
+is required.
+.TP
+.B \-user
+User service in
+.IR ~/.config/systemd/user ;
+no root needed.
+Lingering is enabled, so the service keeps running after logout.
+.B \-config
+names the configuration the unit uses.
+.TP
+.B \-system
+System service in
+.IR /etc/systemd/system ,
+run as the
+.B node\-tracker
+user, which is created if missing; needs root.
+.B \-config
+names the configuration to install as
+.I /etc/node\-tracker/config.yaml
+(mode 0640, group
+.BR node\-tracker );
+without it, the one already there is used.
+Its secret files must already be in
+.IR /etc/node\-tracker .
+The binary and every directory above it must be owned by root and not
+group\- or world\-writable, and every
+.B cookie_file
+must be readable by the service.
+If the deb or rpm package's units already run this binary, they are
+enabled instead.
+.TP
+.B \-timer
+Install
+.B node\-tracker\-once.timer
+(one tick every 30 seconds) instead of the daemon.
+.TP
+.B \-dry\-run
+Print the files and commands, change nothing.
+.TP
+.B \-force
+Replace a changed unit or configuration, keeping the old one as
+.IR .bak .
 .SH EXIT STATUS
 .TP
 .B 0
