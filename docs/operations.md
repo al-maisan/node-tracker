@@ -394,7 +394,7 @@ overwritten.
 | Symptom | Check |
 |---|---|
 | `NODE_DOWN` right after setup | `node-tracker check -log-level debug`; its ERROR column hints at the likely cause. Common causes: wrong URL or port, the cookie isn't readable by node-tracker's user, the RPC user lacks `getblockchaininfo` in `rpcwhitelist`, or the node is still starting (`rpc error -28: Loading block index`). |
-| `NO_REFERENCE` | Every reference failed: no internet, a proxy is needed, or a typo in the URL. One failing reference out of several only logs a warning. |
+| `NO_REFERENCE` | No independent reference answered: no internet, a proxy is needed, or a typo in the URL. One failing reference out of several only logs a warning, but a reference on the node's host (your own electrs) answering alone is not enough. |
 | Always `LAGGING` by 1–2 blocks | Normal right after a new block. Raise `threshold` or `for`. |
 | exit code 1 from `once`, log says `alerts not delivered yet` | the notifier is failing; see the error above that line, then run `node-tracker test-notify` |
 | exit code 3 every run | Another node-tracker (daemon or timer) uses the same state file. Run only one. |

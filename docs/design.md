@@ -44,16 +44,20 @@ every reference is down.
 ### Why `max` and not median? And what about a lying reference?
 
 - A reference that is behind or stuck can never hide a lagging node: `max`
-  ignores it.
+  ignores it, as long as an independent reference answers. An Esplora
+  reference on the node's host (e.g. its own electrs) stalls with the node,
+  so when the target has independent references and none answers, the
+  state is `NO_REFERENCE` even if a local one does.
 - A reference that lies *high* can only cause a false alarm, never a missed
   one. A false alarm is visible and easy to debug; a missed alarm is not.
 - The alert message names the reference that set the tip, so a bad reference
   is easy to spot.
 - A single reference that is broken or tampered with (e.g. reached over
   plain http) could still pin the target in `LAGGING` with an absurd
-  height. With **three or more** responding references, a reference more
-  than `reference_outlier` blocks (default 6) **above every other
-  reference** is ignored and logged.
+  height. With **three or more** responding independent references, one
+  more than `reference_outlier` blocks (default 6) **above every other
+  one** is ignored and logged. References on the node's host don't vote:
+  they may be stuck with the node.
   - Two references can't outvote each other: with two that disagree, the
     lower one may be stuck along with the node (a local electrs), so the
     higher one wins.
@@ -70,7 +74,7 @@ Each target is always in exactly one state:
 | `OK` | lag ≤ threshold |
 | `LAGGING` | lag > threshold |
 | `NODE_DOWN` | the node RPC call failed |
-| `NO_REFERENCE` | the node is up, but every external reference failed |
+| `NO_REFERENCE` | the node is up, but no independent reference answered |
 
 Rules:
 

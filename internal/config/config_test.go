@@ -452,6 +452,52 @@ func TestWarnings(t *testing.T) {
 	}
 }
 
+// An Esplora on the node's host (same host, or both loopback) may follow the
+// node, so it is marked and, if it is the only kind, warned about.
+func TestNodeHostReferences(t *testing.T) {
+	refs := `    references:
+      - {kind: esplora, url: "http://localhost:3000/api"}
+      - {kind: esplora, url: "http://127.0.0.1:3002/api"}
+      - {kind: bitcoind, url: "http://127.0.0.1:18332", cookie_file: COOKIEFILE}
+      - {kind: esplora, url: "https://mempool.space/api"}
+`
+	c, warns, err := Load(write(t, strings.Replace(valid, "    references:\n      - kind: esplora\n        url: https://mempool.space/api\n", refs, 1)))
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("err = %v, warns = %q", err, warns)
+	}
+	var got []bool
+	for _, r := range c.Targets[0].References {
+		got = append(got, r.NodeHost)
+	}
+	if fmt.Sprint(got) != "[true true false false]" {
+		t.Fatalf("NodeHost = %v", got)
+	}
+	only := "    references:\n      - {kind: esplora, url: \"http://localhost:3000/api\"}\n"
+	_, warns, err = Load(write(t, strings.Replace(valid, "    references:\n      - kind: esplora\n        url: https://mempool.space/api\n", only, 1)))
+	if err != nil || len(warns) != 1 || !strings.Contains(warns[0], "every reference is an Esplora server on the node's host") {
+		t.Fatalf("err = %v, warns = %q", err, warns)
+	}
+}
+
+func TestSameHost(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{"http://127.0.0.1:8332", "http://localhost:3000", true},
+		{"http://[::1]:8332", "http://127.0.0.2:3000", true},
+		{"http://Node.lan:8332", "http://node.LAN:3000/api", true},
+		{"http://127.0.0.1:8332", "https://mempool.space/api", false},
+		{"http://10.0.0.5:8332", "http://10.0.0.6:3000", false},
+		{"http://" + onion + ":8332", "http://" + onion + ":3000", true},
+		{"%zz", "%zz", false},
+	} {
+		if got := sameHost(tt.a, tt.b); got != tt.want {
+			t.Errorf("sameHost(%q, %q) = %v", tt.a, tt.b, got)
+		}
+	}
+}
+
 // A missing cookie is a warning: bitcoind writes it on start.
 func TestMissingCookie(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), ".cookie")

@@ -22,6 +22,7 @@ type Target struct {
 	Name   string
 	Node   source.Source
 	Refs   []source.Source
+	Local  []bool // Local[i]: Refs[i] is on the node's host (health.Reading.Local); nil: none
 	Rule   health.Rule
 	Notify []string // notifier names
 }
@@ -104,7 +105,10 @@ func (m *Monitor) sample(ctx context.Context, t Target) health.Sample {
 	var wg sync.WaitGroup
 	wg.Go(func() { s.Node = read(t.Node) })
 	for i, r := range t.Refs {
-		wg.Go(func() { s.Refs[i] = read(r) })
+		wg.Go(func() {
+			s.Refs[i] = read(r)
+			s.Refs[i].Local = i < len(t.Local) && t.Local[i]
+		})
 	}
 	wg.Wait()
 	return s

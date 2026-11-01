@@ -53,7 +53,7 @@ func Report(at time.Time, rows []Row) Message {
 			continue
 		case health.NoReference:
 			bad++
-			fmt.Fprintf(&b, "Network height: unknown, all references failed: %s\n", r.Err)
+			fmt.Fprintf(&b, "Network height: unknown, no independent reference answered: %s\n", r.Err)
 		default:
 			fmt.Fprintf(&b, "Network height: %s%s\n", Num(r.Tip), via(r.TipFrom))
 		}
