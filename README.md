@@ -32,6 +32,11 @@ orendil  LAGGING  974079  974085  6    esplora:mempool.space
 > Was: OK
 > At: 2026-11-01 08:30:00 UTC
 
+![node-tracker demo: check, test-notify, then two once runs raising a LAGGING alert](docs/demo/demo.gif)
+
+The demo runs against local fakes of bitcoind, Esplora and Telegram; see
+[`docs/demo/`](docs/demo/).
+
 ## Features
 
 - **Catches the silent failures.** Your node's height is checked against
