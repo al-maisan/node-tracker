@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="node-tracker logo: a gauge showing how far the node is behind the chain tip" width="116">
+    <img src="assets/logo.svg" alt="node-tracker logo: a gauge showing how far the node is behind the chain tip, and the name node-tracker" width="389">
   </picture>
 </p>
 
