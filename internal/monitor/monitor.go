@@ -33,7 +33,8 @@ type Monitor struct {
 	Notifiers   map[string]notify.Notifier
 	Timeout     time.Duration // per source call, unless set with source.WithTimeout
 	Retry       notify.Retry
-	OutboxLimit int // pending events per notifier
+	OutboxLimit int    // pending events per notifier
+	Tracker     string // name in front of every message (notify.Tag); "" for none
 	Log         *slog.Logger
 	Now         func() time.Time // defaults to time.Now
 }
@@ -175,7 +176,7 @@ func (m *Monitor) Deliver(ctx context.Context, d *state.Data) (pending int) {
 				if !slices.Contains(p.Notifiers, name) {
 					continue
 				}
-				err := notify.Send(ctx, n, notify.Render(p.Event), m.Retry)
+				err := notify.Send(ctx, n, notify.Tag(m.Tracker, notify.Render(p.Event)), m.Retry)
 				switch {
 				case err == nil:
 					m.Log.Info("alert delivered", "notifier", name, "target", p.Event.Target, "to", p.Event.To)
@@ -216,6 +217,7 @@ func (m *Monitor) Deliver(ctx context.Context, d *state.Data) (pending int) {
 // Broadcast sends msg through every notifier now, bypassing the outbox. It is
 // used for status reports and test messages, which are worthless if late.
 func (m *Monitor) Broadcast(ctx context.Context, msg notify.Message) error {
+	msg = notify.Tag(m.Tracker, msg)
 	errs := make([]error, 0, len(m.Notifiers))
 	var mu sync.Mutex
 	var wg sync.WaitGroup

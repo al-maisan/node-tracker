@@ -49,6 +49,7 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 		Timeout:     c.Timeout,
 		Retry:       notify.DefaultRetry,
 		OutboxLimit: OutboxLimit,
+		Tracker:     c.Name,
 		Log:         log,
 	}
 	for _, n := range c.Notifiers {

@@ -9,6 +9,10 @@
 # machine, node, references, alert and notify can be left out: see
 # "Minimal config" in docs/configuration.md.
 
+# Optional. Name of this tracker, in front of every message, e.g.
+# "[shb] 🔴 my-node is lagging": tells several trackers apart.
+# name: shb
+
 # Time between ticks in `run` (daemon) mode. Ignored by `once`.
 interval: 30s
 

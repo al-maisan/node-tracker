@@ -763,3 +763,15 @@ func TestHideCookie(t *testing.T) {
 		}
 	}
 }
+
+// name is optional and follows the target name rules; it goes into every
+// message.
+func TestTrackerName(t *testing.T) {
+	c, _, err := Load(write(t, "name: shb\n"+valid))
+	if err != nil || c.Name != "shb" {
+		t.Fatalf("name: %v, %q", err, c.Name)
+	}
+	if _, _, err := Load(write(t, "name: \"my tracker\"\n"+valid)); err == nil || !strings.Contains(err.Error(), `name "my tracker": must match`) {
+		t.Fatalf("bad name: %v", err)
+	}
+}
