@@ -24,10 +24,11 @@ between versions.
   [Tor](operations.md#tor).
 
 Either way, use `username` + `password_file`, not `cookie_file`. Put the
-password in a file only node-tracker's user can read:
+password in a file only node-tracker's user can read (`cat` waits for it:
+paste it, press Enter, then Ctrl-D):
 
 ```sh
-mkdir -p ~/.config/node-tracker && install -m 600 /dev/null ~/.config/node-tracker/node-rpc-password && $EDITOR ~/.config/node-tracker/node-rpc-password
+mkdir -p ~/.config/node-tracker && rm -f ~/.config/node-tracker/node-rpc-password && (umask 077 && cat > ~/.config/node-tracker/node-rpc-password)
 ```
 
 The node part of the config has one of these shapes (Umbrel values; the

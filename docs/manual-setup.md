@@ -11,7 +11,7 @@ Create a bot and find your chat id; this takes about two minutes, see
 (`cat` waits for the token: paste it, press Enter, then Ctrl-D):
 
 ```sh
-mkdir -p ~/.config/node-tracker && (umask 077 && cat > ~/.config/node-tracker/telegram-token)
+mkdir -p ~/.config/node-tracker && rm -f ~/.config/node-tracker/telegram-token && (umask 077 && cat > ~/.config/node-tracker/telegram-token)
 ```
 
 ## 2. Configure

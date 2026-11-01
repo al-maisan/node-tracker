@@ -73,7 +73,9 @@ sudo cp deploy/systemd/system/node-tracker.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now node-tracker
 ```
 
-- In the config, point `bot_token_file` at `/etc/node-tracker/telegram-token`.
+- In the config, point `bot_token_file` at `/etc/node-tracker/telegram-token`
+  and `cookie_file` at bitcoind's cookie, e.g. `/var/lib/bitcoind/.cookie`:
+  the service has no home, so the example's `~/` paths don't work for it.
   The secret files are mode `640` with group `node-tracker`, so node-tracker
   can read them and nobody else can (no permission warning).
 - To read bitcoind's `.cookie`, give the service the group that owns it
@@ -113,11 +115,13 @@ sudo install -m 640 -o root -g node-tracker /dev/null /etc/node-tracker/telegram
 sudo systemctl enable --now node-tracker
 ```
 
+- Set `bot_token_file` and `cookie_file` as [above](#systemd-system-service):
+  absolute paths, not the example's `~/`.
 - Change a packaged unit with `sudo systemctl edit node-tracker` (e.g. for
   `SupplementaryGroups=`). An upgrade overwrites the files in
   `/usr/lib/systemd`, but not your drop-ins.
-- An upgrade does not restart the service: run
-  `sudo systemctl restart node-tracker` afterwards.
+- An upgrade restarts the system units that are running, not user units:
+  run `systemctl --user restart node-tracker` (or the timer) for those.
 - The user units are installed too: copy the example config to
   `~/.config/node-tracker/config.yaml`, then
   `systemctl --user enable --now node-tracker`.
@@ -378,7 +382,9 @@ host.
 
 ## Upgrades
 
-Replace the binary (or upgrade the package) and restart the service. The
+Replace the binary and restart the service. A package upgrade restarts
+the running system units itself, not user units (`systemctl --user restart
+node-tracker`). The
 state file format is versioned. If a future version changes it, the release
 notes will say how to migrate; an unknown version is refused, never
 overwritten.

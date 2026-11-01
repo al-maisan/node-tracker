@@ -76,7 +76,8 @@ fi
 %systemd_user_preun %{units}
 
 %postun
-%systemd_postun %{units}
+# An upgrade restarts the running units, like the deb.
+%systemd_postun_with_restart %{units}
 %systemd_user_postun %{units}
 
 %files -f bin.files
