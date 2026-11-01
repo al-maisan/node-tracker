@@ -9,6 +9,10 @@
 
 **Get a Telegram message when your Bitcoin node falls behind the chain tip, and another when it catches up.**
 
+**Install:** `brew install al-maisan/tap/node-tracker` (macOS, Linux), or
+see [Install](#install) for the signed release archive (any Linux, including
+Raspberry Pi) and `go install`. Then follow the [Quick start](#quick-start).
+
 A node that has lost its peers, is eclipsed, or hangs after a crash often
 *looks* healthy: the process runs, the RPC port answers, and the node thinks
 it is in sync because it hears of no new blocks. node-tracker compares your
@@ -70,59 +74,55 @@ delivers this:
 - **One small static binary.** The Go standard library plus a YAML parser;
   no runtime and no database.
 
+## Install
+
+The easiest way first:
+
+- **Homebrew** (macOS, Linux amd64/arm64):
+
+  ```sh
+  brew install al-maisan/tap/node-tracker
+  ```
+
+  The docs are then in `$(brew --prefix)/share/doc/node-tracker`, the
+  systemd units and example config in `$(brew --prefix)/share/node-tracker`,
+  and `man node-tracker` works.
+
+- **Release archive** (Linux amd64, arm64, armv7 for a 32-bit Raspberry Pi
+  OS; macOS amd64, arm64): download the archive for your system from the
+  [releases page](https://github.com/al-maisan/node-tracker/releases),
+  together with `SHA256SUMS` and `SHA256SUMS.asc`. Verify and unpack it
+  (example for `v1.0.0` on Linux amd64):
+
+  ```sh
+  curl -s https://github.com/al-maisan.gpg | gpg --import && gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | grep -q '^\[GNUPG:\] VALIDSIG .* 753B6ECF2B458FF3D19D568C1E0A288397AE739E$' && sha256sum --ignore-missing -c SHA256SUMS && tar -xzf node-tracker_1.0.0_linux_amd64.tar.gz
+  ```
+
+  The `grep` only passes for a good signature from the release key
+  `753B 6ECF 2B45 8FF3 D19D 568C 1E0A 2883 97AE 739E`. On macOS use
+  `shasum -a 256 --ignore-missing -c SHA256SUMS`. The archive holds the
+  binary, its man page (`node-tracker.1`), this README, the docs, the
+  systemd units and an example config.
+
+  Put the binary on your `PATH`. `/usr/local/bin` also suits the system
+  service, which needs a root-owned path:
+
+  ```sh
+  sudo install -m 755 node-tracker_1.0.0_linux_amd64/node-tracker /usr/local/bin/
+  ```
+
+- **Go 1.26+:**
+
+  ```sh
+  go install github.com/al-maisan/node-tracker/cmd/node-tracker@latest
+  ```
+
+  This puts `node-tracker` in `~/go/bin`, which must be on your `PATH`. Or
+  build from a clone: `make build` puts it in `bin/node-tracker`.
+
 ## Quick start
 
-1. **Install.** Download the archive for your system (Linux amd64, arm64,
-   armv7 for Raspberry Pi; macOS amd64, arm64) from the
-   [releases page](https://github.com/al-maisan/node-tracker/releases),
-   together with `SHA256SUMS` and `SHA256SUMS.asc`. Verify and unpack it
-   (example for `v1.0.0` on Linux amd64):
-
-   ```sh
-   curl -s https://github.com/al-maisan.gpg | gpg --import && gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | grep -q '^\[GNUPG:\] VALIDSIG .* 753B6ECF2B458FF3D19D568C1E0A288397AE739E$' && sha256sum --ignore-missing -c SHA256SUMS && tar -xzf node-tracker_1.0.0_linux_amd64.tar.gz
-   ```
-
-   The `grep` only passes for a good signature from the release key
-   `753B 6ECF 2B45 8FF3 D19D 568C 1E0A 2883 97AE 739E`. On macOS use
-   `shasum -a 256 --ignore-missing -c SHA256SUMS`. The archive holds the
-   binary, its man page (`node-tracker.1`), this README, the docs, the systemd
-   units and an example config.
-
-   Or, with Homebrew (macOS, Linux amd64/arm64):
-
-   ```sh
-   brew install al-maisan/tap/node-tracker
-   ```
-
-   The docs are then in `$(brew --prefix)/share/doc/node-tracker`, the
-   systemd units and example config in `$(brew --prefix)/share/node-tracker`,
-   and `man node-tracker` works.
-
-   Or, on Ubuntu 26.04 (amd64, arm64):
-
-   ```sh
-   sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker
-   ```
-
-   Or, on Fedora (x86_64, aarch64):
-
-   ```sh
-   sudo dnf copr enable al-maisan/node-tracker && sudo dnf install node-tracker
-   ```
-
-   Either package installs `/usr/bin/node-tracker` with its man page, the
-   systemd units (none is enabled) and a `node-tracker` system user. The
-   docs and example config are in `/usr/share/doc/node-tracker`; see
-   [docs/operations.md](docs/operations.md#from-a-package) for the setup.
-
-   Or, with Go 1.26+:
-
-   ```sh
-   go install github.com/al-maisan/node-tracker/cmd/node-tracker@latest
-   ```
-
-   This puts `node-tracker` in `~/go/bin`. Or build from a clone:
-   `make build` puts it in `bin/node-tracker`.
+1. **Install** node-tracker; see [Install](#install).
 
 2. **Create a Telegram bot** and find your chat id. This takes about two
    minutes; see [docs/telegram.md](docs/telegram.md). Save the token:
