@@ -7,8 +7,19 @@ node-tracker reads one YAML file:
    `~/.config/node-tracker/config.yaml`. This is the same on every OS,
    macOS included.
 
-The file is checked strictly. An unknown key, such as a typo, is an error,
-and every problem is reported in one go:
+If there is no file, node-tracker says where it looked and how to create
+one. The file is checked strictly. An unknown key, such as a typo, is an
+error that names the closest known key, and every problem is reported in
+one go:
+
+```text
+$ node-tracker check
+node-tracker: /home/me/.config/node-tracker/config.yaml: invalid config:
+line 12: unknown key "treshold" in targets[0].alert (did you mean "threshold"?)
+line 2: interval "soon": must be a duration such as 30s or 5m
+```
+
+Once the YAML fits, the values are checked:
 
 ```text
 $ node-tracker check
@@ -114,7 +125,7 @@ Bitcoin Core JSON-RPC. Only `getblockchaininfo` is called.
 | Key | Meaning |
 |---|---|
 | `url` | e.g. `http://127.0.0.1:8332`. Must not contain credentials. |
-| `cookie_file` | Bitcoin Core's `.cookie` (e.g. `~/.bitcoin/.cookie`, `/var/lib/bitcoind/.cookie`, on macOS `~/Library/Application Support/Bitcoin/.cookie`). It is re-read on every call, so a node restart, which writes a new cookie, needs no action. |
+| `cookie_file` | Bitcoin Core's `.cookie` (e.g. `~/.bitcoin/.cookie`, `/var/lib/bitcoind/.cookie`, on macOS `~/Library/Application Support/Bitcoin/.cookie`). It is re-read on every call, so a node restart, which writes a new cookie, needs no action. If it does not exist yet, a warning is logged, not an error. |
 | `username` + `password_file` / `password_env` | Use these instead of the cookie, with `rpcauth` credentials. |
 | `allow_insecure` | Allow plain `http://` to a non-loopback host (see below). |
 | `proxy` | Optional proxy for this endpoint only (see [Proxies and Tor](#proxies-and-tor)). |

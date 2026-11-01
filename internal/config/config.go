@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -124,6 +125,9 @@ type Notifier struct {
 // findings, such as a secret file readable by others.
 func Load(path string) (*Config, []string, error) {
 	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, NoConfigError{path, err}
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,7 +146,7 @@ func Load(path string) (*Config, []string, error) {
 		if errors.Is(err, io.EOF) {
 			return nil, nil, fmt.Errorf("%s: empty config", path)
 		}
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("%s: invalid config:\n%w", path, yamlError(raw, err))
 	}
 	v := &validator{}
 	c.validate(v)
@@ -151,6 +155,22 @@ func Load(path string) (*Config, []string, error) {
 	}
 	return &c, v.warns, nil
 }
+
+// NoConfigHint tells how to create a config. It follows "no config at
+// <path>; ".
+const NoConfigHint = "copy examples/config.yaml there and edit it; see docs/configuration.md"
+
+// NoConfigError is Load's error for a missing file. It unwraps to
+// fs.ErrNotExist.
+type NoConfigError struct {
+	Path string
+	Err  error
+}
+
+func (e NoConfigError) Error() string {
+	return fmt.Sprintf("no config at %s; %s", e.Path, NoConfigHint)
+}
+func (e NoConfigError) Unwrap() error { return e.Err }
 
 type validator struct {
 	errs  []error
@@ -295,6 +315,9 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 		e.CookieFile = expandHome(e.CookieFile)
 		if e.CookieFile != "" && !filepath.IsAbs(e.CookieFile) {
 			v.bad(p+".cookie_file", e.CookieFile, "must be an absolute path or start with ~/")
+		} else if _, err := os.Stat(e.CookieFile); e.CookieFile != "" && errors.Is(err, fs.ErrNotExist) {
+			// bitcoind writes it on start, so this may fix itself.
+			v.warns = append(v.warns, fmt.Sprintf("%s.cookie_file: %s does not exist; bitcoind is not started yet or its datadir is elsewhere. For a remote node, use username and password_file", p, e.CookieFile))
 		}
 		hasUser := e.Username != ""
 		switch {

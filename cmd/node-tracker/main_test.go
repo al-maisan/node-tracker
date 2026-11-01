@@ -478,3 +478,27 @@ func TestDefaultConfigPath(t *testing.T) {
 		t.Fatalf("install-service: code=%d, no %q in\n%s%s", code, want, out, errs)
 	}
 }
+
+// A missing config says where it was looked for and how to create one; a
+// missing cookie is a warning, not an error.
+func TestNoConfigAndMissingCookie(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	want := "node-tracker: no config at " + filepath.Join(home, ".config", "node-tracker", "config.yaml") + "; copy examples/config.yaml"
+	if code, _, errs := exec(t, "check"); code != exitUsage || !strings.HasPrefix(errs, want) {
+		t.Fatalf("code=%d stderr=%q, want %q…", code, errs, want)
+	}
+
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	cfg, _ := w.config(t)
+	b, _ := os.ReadFile(cfg)
+	cookie := filepath.Join(home, ".bitcoin", ".cookie")
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "username: u, password_env: NT_TEST_PW", "cookie_file: "+cookie, 1)), 0o600)
+	code, out, errs := exec(t, "check", "-config", cfg)
+	if code != exitNotInSync || !strings.Contains(out, "NODE_DOWN") || !strings.Contains(errs, "level=WARN msg=config warning=\"targets[0].node.cookie_file: "+cookie+" does not exist; bitcoind is not started yet") {
+		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	}
+}
