@@ -212,6 +212,60 @@ func TestURLPasswordNeverShown(t *testing.T) {
 	}
 }
 
+// A secret pasted where its file or variable name goes is never echoed.
+func TestPastedSecretNeverShown(t *testing.T) {
+	const (
+		token  = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ"
+		pw     = "s3cr3t-Pa55word"
+		cookie = "__cookie__:9f2c4a1b7e"
+		node   = "      cookie_file: COOKIEFILE\n"
+		auth   = "      username: u\n"
+	)
+	for _, tt := range []struct{ name, old, new, secret, want string }{
+		{"token file", "bot_token_file: TOKENFILE", `bot_token_file: "` + token + `"`, token, "notifiers[0].bot_token_file: must be the path of a file holding the secret (absolute or ~/…), not the secret itself (value not shown); it looks like the bot token itself"},
+		{"token env", "bot_token_file: TOKENFILE", `bot_token_env: "` + token + `"`, token, "notifiers[0].bot_token_env: must be the name of an environment variable, not the secret itself (value not shown)"},
+		{"password file", node, auth + "      password_file: " + pw + "\n", pw, "targets[0].node.password_file: must be the path of a file holding the secret (absolute or ~/…), not the secret itself (value not shown)"},
+		{"password env", node, auth + "      password_env: " + pw + "\n", pw, "targets[0].node.password_env: must be the name of an environment variable, not the secret itself (value not shown)"},
+		{"password env, valid name", node, auth + "      password_env: Xk3vQ9ZbLmT2wPq8RtYs\n", "Xk3vQ9ZbLmT2wPq8RtYs", "targets[0].node.password_env: the environment variable is not set or empty (name not shown: it may be the secret itself)"},
+		{"base64 password file", node, auth + "      password_file: kQ9/zX+bLmT2wPq8RtYs=\n", "kQ9/zX+bLmT2wPq8RtYs=", "targets[0].node.password_file: must be the path of a file holding the secret (absolute or ~/…), not the secret itself (value not shown)"},
+		{"absolute base64 password file", node, auth + "      password_file: /kQ9zX+bLmT2wPq8RtYs=\n", "kQ9zX+bLmT2wPq8RtYs=", "targets[0].node.password_file: stat: no such file or directory (path not shown: it may be the secret itself)"},
+		{"cookie file", node, "      cookie_file: " + cookie + "\n", cookie, "targets[0].node.cookie_file: must be the path of a file holding the cookie (absolute or ~/…), not the cookie itself (value not shown)"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(valid, tt.old) {
+				t.Fatalf("valid has no %q", tt.old)
+			}
+			_, _, err := Load(write(t, strings.Replace(valid, tt.old, tt.new, 1)))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %s", err, tt.want)
+			}
+			if strings.Contains(err.Error(), tt.secret) {
+				t.Fatalf("error leaks the secret: %v", err)
+			}
+		})
+	}
+	// Path-shaped values, existing directories and real variable names are
+	// still shown.
+	missing := filepath.Join(t.TempDir(), "token")
+	_, _, err := Load(write(t, strings.Replace(valid, "bot_token_file: TOKENFILE", "bot_token_file: "+missing, 1)))
+	if err == nil || !strings.Contains(err.Error(), "stat "+missing+": no such file") {
+		t.Fatalf("missing file in an existing dir: err = %v", err)
+	}
+	_, _, err = Load(write(t, strings.Replace(valid, "bot_token_file: TOKENFILE", "bot_token_env: NT_NO_SUCH_VAR", 1)))
+	if err == nil || !strings.Contains(err.Error(), "environment variable NT_NO_SUCH_VAR is not set or empty") {
+		t.Fatalf("env name: err = %v", err)
+	}
+	_, _, err = Load(write(t, strings.Replace(valid, "cookie_file: COOKIEFILE", "cookie_file: ./cookie", 1)))
+	if err == nil || !strings.Contains(err.Error(), `cookie_file "./cookie": must be an absolute path`) {
+		t.Fatalf("relative path: err = %v", err)
+	}
+	// A missing cookie is a warning, which hides a secret-like path too.
+	_, warns, err := Load(write(t, strings.Replace(valid, "cookie_file: COOKIEFILE", "cookie_file: /kQ9zX+bLmT2wPq8RtYs=", 1)))
+	if err != nil || len(warns) != 1 || !strings.Contains(warns[0], "cookie_file: (path not shown: it may be the secret itself) does not exist") || strings.Contains(warns[0], "kQ9zX") {
+		t.Fatalf("missing cookie: warns = %q, err = %v", warns, err)
+	}
+}
+
 // Tor Project's v3 onion address; its checksum is valid.
 const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
 

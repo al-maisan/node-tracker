@@ -56,6 +56,11 @@ var (
 	nameRE   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	chatIDRE = regexp.MustCompile(`^(-?[0-9]{1,20}|@[A-Za-z0-9_]{5,32})$`)
 	schemeRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://`)
+	envRE    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// Only conventional names are echoed: many generated passwords are also
+	// valid (mixed-case) variable names.
+	envShownRE = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
+	tokenRE    = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]{30,}$`)
 )
 
 // Secret is a resolved secret. It formats as "REDACTED" so it can't leak
@@ -314,10 +319,14 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 	case KindBitcoind:
 		e.CookieFile = expandHome(e.CookieFile)
 		if e.CookieFile != "" && !filepath.IsAbs(e.CookieFile) {
-			v.bad(p+".cookie_file", e.CookieFile, "must be an absolute path or start with ~/")
+			v.badPath(p+".cookie_file", e.CookieFile, "cookie")
 		} else if _, err := os.Stat(e.CookieFile); e.CookieFile != "" && errors.Is(err, fs.ErrNotExist) {
+			shown := "(path not shown: it may be the secret itself)"
+			if shownPath(e.CookieFile) {
+				shown = e.CookieFile
+			}
 			// bitcoind writes it on start, so this may fix itself.
-			v.warns = append(v.warns, fmt.Sprintf("%s.cookie_file: %s does not exist; bitcoind is not started yet or its datadir is elsewhere. For a remote node, use username and password_file", p, e.CookieFile))
+			v.warns = append(v.warns, fmt.Sprintf("%s.cookie_file: %s does not exist; bitcoind is not started yet or its datadir is elsewhere. For a remote node, use username and password_file", p, shown))
 		}
 		hasUser := e.Username != ""
 		switch {
@@ -375,6 +384,45 @@ func (n *Notifier) validate(v *validator, p string) {
 	}
 }
 
+// shownPath reports whether a *_file or cookie_file value may appear in
+// messages: a secret pasted in its place must not end up in an error, a
+// terminal or the journal. It must look like a path (a "/", no ":", and a
+// "." or a leading "~" or "$"; tokens and cookies hold a ":", base64
+// passwords have none of the others), or its directory must exist.
+func shownPath(p string) bool {
+	if strings.Contains(p, ":") || !strings.Contains(p, "/") {
+		return false
+	}
+	if strings.Contains(p, ".") || strings.HasPrefix(p, "~") || strings.HasPrefix(p, "$") {
+		return true
+	}
+	d := filepath.Dir(p)
+	fi, err := os.Stat(d)
+	return d != "/" && filepath.IsAbs(d) && err == nil && fi.IsDir()
+}
+
+// fileErr is err without the path, unless shownPath allows it.
+func fileErr(file string, err error) string {
+	var pe *fs.PathError
+	if shownPath(file) || !errors.As(err, &pe) {
+		return err.Error()
+	}
+	return pe.Op + ": " + pe.Err.Error() + " (path not shown: it may be the secret itself)"
+}
+
+// badPath reports a file path that is not absolute; see shownPath.
+func (v *validator) badPath(path, value, what string) {
+	if shownPath(value) {
+		v.bad(path, value, "must be an absolute path or start with ~/")
+		return
+	}
+	hint := ""
+	if tokenRE.MatchString(value) {
+		hint = "; it looks like the bot token itself"
+	}
+	v.errf(path, "must be the path of a file holding the %s (absolute or ~/…), not the %s itself (value not shown)%s", what, what, hint)
+}
+
 // resolveSecret reads a secret from exactly one of file or env. Secret
 // values never appear in errors or warnings.
 func resolveSecret(v *validator, p, file, env string) Secret {
@@ -384,12 +432,12 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 		return ""
 	case file != "":
 		if file = expandHome(file); !filepath.IsAbs(file) {
-			v.bad(p+"_file", file, "must be an absolute path or start with ~/")
+			v.badPath(p+"_file", file, "secret")
 			return ""
 		}
 		fi, err := os.Stat(file)
 		if err != nil {
-			v.errf(p+"_file", "%v", err)
+			v.errf(p+"_file", "%s", fileErr(file, err))
 			return ""
 		}
 		if fi.Size() > maxSecretSize {
@@ -401,7 +449,7 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 		}
 		b, err := os.ReadFile(file)
 		if err != nil {
-			v.errf(p+"_file", "%v", err)
+			v.errf(p+"_file", "%s", fileErr(file, err))
 			return ""
 		}
 		s := strings.TrimSpace(string(b))
@@ -410,9 +458,17 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 		}
 		return Secret(s)
 	case env != "":
+		if !envRE.MatchString(env) {
+			v.errf(p+"_env", "must be the name of an environment variable, not the secret itself (value not shown)")
+			return ""
+		}
 		s, ok := os.LookupEnv(env)
 		if s = strings.TrimSpace(s); !ok || s == "" {
-			v.errf(p+"_env", "environment variable %s is not set or empty", env)
+			if envShownRE.MatchString(env) {
+				v.errf(p+"_env", "environment variable %s is not set or empty", env)
+			} else {
+				v.errf(p+"_env", "the environment variable is not set or empty (name not shown: it may be the secret itself)")
+			}
 		}
 		return Secret(s)
 	default:
