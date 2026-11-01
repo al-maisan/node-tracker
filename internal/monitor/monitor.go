@@ -51,6 +51,16 @@ func (m *Monitor) now() time.Time {
 // against the states in d (nil: no history). It changes nothing. It returns
 // ctx's error if ctx ended while sampling: such samples are meaningless.
 func (m *Monitor) Observe(ctx context.Context, d *state.Data) ([]Result, error) {
+	samples, err := m.Sample(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.Classify(samples, d), nil
+}
+
+// Sample reads every target's sources in parallel, in the order of
+// m.Targets. It returns ctx's error if ctx ended while sampling.
+func (m *Monitor) Sample(ctx context.Context) ([]health.Sample, error) {
 	samples := make([]health.Sample, len(m.Targets))
 	var wg sync.WaitGroup
 	for i, t := range m.Targets {
@@ -60,6 +70,12 @@ func (m *Monitor) Observe(ctx context.Context, d *state.Data) ([]Result, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	return samples, nil
+}
+
+// Classify judges the samples from Sample against the states in d (nil: no
+// history).
+func (m *Monitor) Classify(samples []health.Sample, d *state.Data) []Result {
 	res := make([]Result, len(m.Targets))
 	for i, t := range m.Targets {
 		lagging := d != nil && d.Targets[t.Name].Lagging()
@@ -71,7 +87,7 @@ func (m *Monitor) Observe(ctx context.Context, d *state.Data) ([]Result, error) 
 		m.Log.Debug("sample", "target", t.Name, "observed", o.State, "lag", o.Lag,
 			"node", o.Node, "tip", o.Tip, "tip_from", o.TipFrom)
 	}
-	return res, nil
+	return res
 }
 
 func (m *Monitor) sample(ctx context.Context, t Target) health.Sample {

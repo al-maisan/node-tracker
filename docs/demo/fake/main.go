@@ -1,8 +1,8 @@
 //go:build ignore
 
 // Command fake serves the three APIs node-tracker talks to, for the demo GIF:
-// bitcoind's getblockchaininfo, Esplora's tip height and Telegram's
-// sendMessage. The node is stuck at -node while the tip is at -tip. Each
+// bitcoind's getblockchaininfo, Esplora's tip height and Telegram's getMe
+// and sendMessage. The node is stuck at -node while the tip is at -tip. Each
 // Telegram message is printed to stdout. Loopback only.
 package main
 
@@ -27,6 +27,8 @@ func main() {
 			fmt.Fprintf(w, `{"result":{"blocks":%d,"headers":%d},"error":null,"id":1}`, *node, *node)
 		case r.URL.Path == "/api/blocks/tip/height":
 			fmt.Fprint(w, *tip)
+		case strings.HasPrefix(r.URL.Path, "/bot") && strings.HasSuffix(r.URL.Path, "/getMe"):
+			fmt.Fprint(w, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"orendil_bot"}}`)
 		case strings.HasPrefix(r.URL.Path, "/bot") && strings.HasSuffix(r.URL.Path, "/sendMessage"):
 			var m struct{ Text string }
 			if err := json.NewDecoder(r.Body).Decode(&m); err != nil {

@@ -20,6 +20,10 @@ direction.
 $ node-tracker check
 TARGET   STATE    NODE    TIP     LAG  TIP FROM               ERROR
 orendil  LAGGING  974079  974085  6    esplora:mempool.space
+
+config             ok
+target orendil     node reachable (cookie) · references 2/2 · LAGGING by 6 is the node's current state, not a setup error
+notifier telegram  token valid (@orendil_bot) · chat not tested → run 'node-tracker test-notify telegram'
 ```
 
 …and on your phone:
@@ -166,7 +170,7 @@ walks through each setup.
 |---|---|
 | `run` | daemon: one tick every `interval` |
 | `once` | one tick, then exit |
-| `check` | dry run: print a status table; touches no state, sends no alerts |
+| `check` | dry run: print a status table and a verdict on the setup; touches no state, sends no alerts |
 | `report` | send a status report of all targets to every notifier |
 | `test-notify [name]` | send a test message through one notifier or all |
 | `install-service -user\|-system` | write the systemd unit for this binary and enable it (`-timer`, `-force`, `-dry-run`) |

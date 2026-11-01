@@ -51,6 +51,22 @@ type rpcResponse struct {
 	} `json:"error"`
 }
 
+// AuthError is an HTTP 401 or 403 from the node.
+type AuthError struct{ Status int }
+
+func (e *AuthError) Error() string { return fmt.Sprintf("rpc auth failed (HTTP %d)", e.Status) }
+
+// RPCError is an error the node returned in the JSON-RPC response.
+type RPCError struct {
+	Code    int
+	Message string
+}
+
+func (e *RPCError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
+
+// ErrWarmup is RPCError.Code while the node is starting (RPC_IN_WARMUP).
+const ErrWarmup = -28
+
 var reqBody = []byte(`{"jsonrpc":"1.0","id":"node-tracker","method":"getblockchaininfo","params":[]}`)
 
 // Height implements source.Source.
@@ -71,7 +87,7 @@ func (c *Client) Height(ctx context.Context) (source.Height, error) {
 		return source.Height{}, err
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return source.Height{}, fmt.Errorf("rpc auth failed (HTTP %d)", status)
+		return source.Height{}, &AuthError{status}
 	}
 	var r rpcResponse
 	if err := json.Unmarshal(body, &r); err != nil {
@@ -83,7 +99,7 @@ func (c *Client) Height(ctx context.Context) (source.Height, error) {
 		return source.Height{}, fmt.Errorf("rpc: decode response: %w", err)
 	}
 	if r.Error != nil {
-		return source.Height{}, fmt.Errorf("rpc error %d: %s", r.Error.Code, r.Error.Message)
+		return source.Height{}, &RPCError{r.Error.Code, r.Error.Message}
 	}
 	if r.Result == nil || r.Result.Blocks == nil || r.Result.Headers == nil {
 		return source.Height{}, errors.New("rpc: response lacks blocks/headers")

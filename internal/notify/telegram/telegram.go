@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -83,6 +84,36 @@ func (b *Bot) Send(ctx context.Context, m notify.Message) error {
 		// 400 bad chat id, 401 bad token, 403 bot blocked: retrying won't help.
 		return notify.Permanent(err)
 	}
+}
+
+// ErrBadToken is returned by CheckToken when Telegram rejects the token.
+var ErrBadToken = errors.New("bot token rejected")
+
+// CheckToken calls getMe, which needs only a valid token, and returns the
+// bot's username. It sends nothing, so the chat id is not tested.
+func (b *Bot) CheckToken(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.api+"/bot"+b.token+"/getMe", nil)
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", httpx.Redact(err))
+	}
+	status, body, err := httpx.Do(b.http, req, maxBody)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		apiResponse
+		Result struct {
+			Username string `json:"username"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(body, &r) // best effort, as in Send
+	switch {
+	case status == http.StatusOK && r.OK:
+		return r.Result.Username, nil
+	case status == http.StatusUnauthorized || status == http.StatusNotFound:
+		return "", fmt.Errorf("telegram: %w (HTTP %d)", ErrBadToken, status)
+	}
+	return "", fmt.Errorf("telegram: HTTP %d: %s", status, r.Description)
 }
 
 func utf16Len(s string) (n int) {

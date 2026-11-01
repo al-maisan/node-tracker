@@ -3,6 +3,7 @@ package bitcoind
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,6 +68,21 @@ func TestHeight(t *testing.T) {
 				t.Fatalf("got %+v, %v; want %+v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+// Callers tell auth failures and RPC errors apart by type, not by text.
+func TestErrorTypes(t *testing.T) {
+	var ae *AuthError
+	_, err := New("n", fakeNode(t, 200, ``).URL, Auth{Username: "u", Password: "wrong"}, httpx.NewClient()).Height(context.Background())
+	if !errors.As(err, &ae) || ae.Status != http.StatusUnauthorized || err.Error() != "rpc auth failed (HTTP 401)" {
+		t.Errorf("bad auth: %#v", err)
+	}
+	var re *RPCError
+	srv := fakeNode(t, 500, `{"result":null,"error":{"code":-28,"message":"Loading block index"}}`)
+	_, err = New("n", srv.URL, Auth{Username: "u", Password: "p"}, httpx.NewClient()).Height(context.Background())
+	if !errors.As(err, &re) || re.Code != ErrWarmup || err.Error() != "rpc error -28: Loading block index" {
+		t.Errorf("warmup: %#v", err)
 	}
 }
 
