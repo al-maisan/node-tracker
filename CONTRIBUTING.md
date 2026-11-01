@@ -19,10 +19,11 @@ make vuln         # govulncheck
 make integration  # needs bitcoind in PATH; starts a throwaway regtest node
 make build        # bin/node-tracker with version, commit and build time
 make dist         # release archives + SHA256SUMS in dist/ (needs GNU tar)
+make test-ppa     # tests of the packaging scripts
 ```
 
-CI runs `lint`, `test`, `vuln` and `dist`, and checks the Homebrew formula
-syntax, on every pull request.
+CI runs `lint`, `test`, `test-ppa`, `vuln` and `dist`, and checks the
+Homebrew formula syntax, on every pull request.
 
 ## Releasing
 
@@ -37,6 +38,21 @@ syntax, on every pull request.
    Homebrew formula `dist/node-tracker.rb` (`scripts/brew-formula.sh`) and
    prints a one-liner that commits it to `Formula/node-tracker.rb` in
    `al-maisan/homebrew-tap`. Check the formula, then run the one-liner.
+4. Run `make ppa` to upload the tag to `ppa:al-maisan/node-tracker`. It
+   builds the source package of the newest stable tag at or below HEAD
+   (`TAG`) with the vendored modules, so Launchpad builds it offline, and
+   signs it with the release key (two key touches per Ubuntu release).
+   Ubuntu releases that already have the version are skipped; after a
+   packaging fix, `make ppa PPA_REV=2` uploads the next revision with the
+   same orig tarball. The packaging (`ppa/debian`,
+   `scripts/install-units.sh`, `deploy/sysusers.d`) comes from the
+   checkout, so a fix also applies to older tags. It needs `go`, `gh`,
+   `curl`, `python3`, `debuild` and `dput`.
+
+`make publish` runs `release` and then `ppa`.
+
+The package changelogs list the commits since the previous GitHub release,
+so run `make ppa` after `make release`.
 
 Release builds use the official Go toolchain pinned in
 `scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and

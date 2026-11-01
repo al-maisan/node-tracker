@@ -1,0 +1,24 @@
+Source: node-tracker
+Section: net
+Maintainer: Muharem Hrnjadovic <muharem@linux.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-sequence-installsysusers,
+               golang-any (>= 2:1.26~)
+Standards-Version: 4.7.3
+Homepage: https://github.com/al-maisan/node-tracker
+Vcs-Browser: https://github.com/al-maisan/node-tracker
+Vcs-Git: https://github.com/al-maisan/node-tracker.git
+
+Package: node-tracker
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Built-Using: ${misc:Built-Using}
+Description: alert when a Bitcoin node falls behind the chain tip
+ node-tracker compares a Bitcoin node's block height with independent views
+ of the chain (mempool.space, blockstream.info or other nodes) and sends a
+ Telegram message when the node falls behind, and another when it catches up.
+ Alerts are debounced and queued until they are delivered.
+ .
+ It runs as a daemon, from a systemd timer or cron, or by hand. The package
+ ships systemd system and user units and creates the node-tracker system
+ user; no unit is enabled or started.

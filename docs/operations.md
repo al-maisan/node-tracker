@@ -44,6 +44,27 @@ sudo systemctl daemon-reload && sudo systemctl enable --now node-tracker
 `systemctl enable --now node-tracker-once.timer`. To change the interval,
 edit `OnUnitActiveSec=`.
 
+### From a package
+
+The deb package has installed the binary, the units and the `node-tracker`
+user, so only the config and the token are left:
+
+```sh
+sudo install -d -m 750 -o root -g node-tracker /etc/node-tracker
+sudo install -m 640 -o root -g node-tracker /usr/share/doc/node-tracker/examples/config.yaml /etc/node-tracker/config.yaml
+sudo install -m 640 -o root -g node-tracker /dev/null /etc/node-tracker/telegram-token   # then put the token in it
+sudo systemctl enable --now node-tracker
+```
+
+- Change a packaged unit with `sudo systemctl edit node-tracker` (e.g. for
+  `SupplementaryGroups=`). An upgrade overwrites the files in
+  `/usr/lib/systemd`, but not your drop-ins.
+- An upgrade does not restart the service: run
+  `sudo systemctl restart node-tracker` afterwards.
+- The user units are installed too: copy the example config to
+  `~/.config/node-tracker/config.yaml`, then
+  `systemctl --user enable --now node-tracker`.
+
 ## systemd user service
 
 No root needed. The config and state use the XDG defaults.
@@ -237,9 +258,10 @@ host.
 
 ## Upgrades
 
-Replace the binary and restart the service. The state file format is
-versioned. If a future version changes it, the release notes will say how
-to migrate; an unknown version is refused, never overwritten.
+Replace the binary (or upgrade the package) and restart the service. The
+state file format is versioned. If a future version changes it, the release
+notes will say how to migrate; an unknown version is refused, never
+overwritten.
 
 ## Troubleshooting
 

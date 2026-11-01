@@ -21,6 +21,7 @@ jobs:
           check-latest: true
       - run: make lint
       - run: make test
+      - run: make test-ppa
       - run: make vuln
       - run: make build && ./bin/node-tracker version
       # A tag-like version, as brew-formula.sh needs one.
