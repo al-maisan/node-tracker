@@ -4,9 +4,8 @@ Umbrel, StartOS (Start9), RaspiBlitz and myNode run Bitcoin Core for you.
 node-tracker works with all of them. It needs the RPC address, a user name
 and a password. This page shows where each box keeps them.
 
-App-store packages (an Umbrel or StartOS app) are out of scope for now. The
-container image ([#35](https://github.com/al-maisan/node-tracker/issues/35))
-comes first.
+App-store packages (an Umbrel or StartOS app) are out of scope for now. On
+a box with Docker, the [container image](operations.md#container) works.
 
 The details below come from each project's source code or docs. Items marked
 **(check on your box)** could not be confirmed there; box UIs also change
@@ -93,6 +92,9 @@ without it they would be denied.
 - **On the box:** ssh in and use `http://10.21.21.8:8332` with
   `allow_insecure: true`, as above. Whether the host's own connection
   passes `rpcallowip`: run the curl check **(check on your box)**.
+- **In a container on the box:** use `compose.umbrel.yaml`, see
+  [Container](operations.md#container). It joins Umbrel's app network,
+  which `rpcallowip` allows.
 - **With `node-tracker setup`:** answer the Tor host from **RPC Details**
   as `http://<host>.onion:8332` (on the box: `http://10.21.21.8:8332`, and
   **y** to the trusted network), **y** to "Do you already have the node's

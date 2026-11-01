@@ -1,0 +1,10 @@
+# On Umbrel: join the network of Umbrel's apps, where bitcoind is
+# http://10.21.21.8:8332 (with allow_insecure: true, see docs/node-boxes.md).
+services:
+  node-tracker:
+    networks: [umbrel]
+
+networks:
+  umbrel:
+    name: umbrel_main_network
+    external: true

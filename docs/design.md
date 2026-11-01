@@ -467,11 +467,12 @@ because a person reads them.
 - Prometheus `/metrics` endpoint
 - Repeat reminders while `LAGGING`
 - "Watch the watcher" heartbeat (dead-man switch)
-- Container image
 - Windows support (the state lock uses `flock`)
 
 Release archives, `.deb` packages (Debian, Raspberry Pi OS) and signed
 checksums: `make dist` / `make release`, see CONTRIBUTING.md. Homebrew: `brew install al-maisan/tap/node-tracker`, the
 formula is written by `make release`. Ubuntu: `ppa:al-maisan/node-tracker`,
 uploaded by `make ppa`. Fedora: COPR `al-maisan/node-tracker`, built by
-`make copr`. Other packaging (AUR) is tracked in issue #8.
+`make copr`. Container image: `ghcr.io/al-maisan/node-tracker`, built
+from the release archives by `make image` and pushed by `make release`.
+Other packaging (AUR) is tracked in issue #8.

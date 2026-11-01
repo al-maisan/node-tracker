@@ -1,0 +1,25 @@
+# node-tracker in a container, with Docker Compose or podman compose. See
+# docs/operations.md, Container. Next to this file:
+#   config.yaml  the config. Secrets come from /run/secrets/<file>, e.g.
+#                bot_token_file: /run/secrets/telegram-token
+#   secrets/     one file per secret, owned by uid 65532 in the container
+#                (see docs/operations.md for the chown)
+# Then: docker compose up -d
+# bitcoind or Tor on this host: docker compose -f compose.yaml -f compose.host.yaml up -d
+# On Umbrel:                   docker compose -f compose.yaml -f compose.umbrel.yaml up -d
+services:
+  node-tracker:
+    # Pin a release with NODE_TRACKER_IMAGE=ghcr.io/al-maisan/node-tracker:v1.2.3
+    image: ${NODE_TRACKER_IMAGE:-ghcr.io/al-maisan/node-tracker:latest}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      # z: lets the container read them on SELinux hosts (Fedora, RHEL).
+      - ./config.yaml:/config/config.yaml:ro,z
+      - ./secrets:/run/secrets:ro,z
+      - state:/state
+
+volumes:
+  state:
