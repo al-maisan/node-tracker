@@ -17,6 +17,7 @@ BUILD_TIME := $(shell date -u -d @$(SOURCE_DATE_EPOCH) +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=v$(DEB_VERSION_UPSTREAM) -X main.commit=@COMMIT@ -X main.buildTime=$(BUILD_TIME)
 DEST := debian/node-tracker
 DOC := $(DEST)/usr/share/doc/node-tracker
+MAN_DATE := $(shell date -u -d @$(SOURCE_DATE_EPOCH) +%Y-%m-%d)
 
 %:
 	dh $@
@@ -42,6 +43,11 @@ override_dh_auto_install:
 	install -Dpm 0644 -t $(DOC)/docs docs/*.md
 	install -Dpm 0644 -t $(DOC)/examples examples/config.yaml
 	install -Dpm 0644 -t $(DOC)/vendor/go.yaml.in/yaml/v3 vendor/go.yaml.in/yaml/v3/NOTICE
+	# Tags before the man page (v1.0.0) have none.
+	if [ -f node-tracker.1 ]; then \
+		install -d $(DEST)/usr/share/man/man1 && \
+		sed -e 's/@VERSION@/$(DEB_VERSION_UPSTREAM)/g' -e 's/@DATE@/$(MAN_DATE)/g' node-tracker.1 >$(DEST)/usr/share/man/man1/node-tracker.1; \
+	fi
 	debian/install-units.sh deploy/systemd $(CURDIR)/$(DEST)/usr/lib/systemd/system $(CURDIR)/$(DEST)/usr/lib/systemd/user
 
 # Ship the units, enable or start none of them.

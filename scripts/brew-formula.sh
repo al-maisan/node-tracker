@@ -61,6 +61,7 @@ $linux_amd64
 
   def install
     bin.install "node-tracker"
+    man1.install "node-tracker.1"
     doc.install "README.md", "assets", "docs"
     pkgshare.install "deploy", "examples"
   end

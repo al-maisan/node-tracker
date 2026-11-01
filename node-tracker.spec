@@ -55,6 +55,16 @@ install -Dpm 0644 -t %{buildroot}%{_docdir}/%{name}/docs docs/*.md
 install -Dpm 0644 -t %{buildroot}%{_docdir}/%{name}/examples examples/config.yaml
 install -Dpm 0644 %{SOURCE2} %{buildroot}%{_sysusersdir}/node-tracker.conf
 bash %{SOURCE1} deploy/systemd %{buildroot}%{_unitdir} %{buildroot}%{_userunitdir}
+# The binary, and the man page if the tag has one (v1.0.0 has none; an
+# empty file list is an error). The placeholders are spelled @VERSION[@]
+# here, so gen-spec.sh leaves them alone.
+echo '%{_bindir}/node-tracker' >bin.files
+if [ -f node-tracker.1 ]; then
+    man_date=$(date -u -d "@${SOURCE_DATE_EPOCH:?}" +%%Y-%%m-%%d)
+    install -d %{buildroot}%{_mandir}/man1
+    sed -e "s/@VERSION[@]/%{version}/g" -e "s/@DATE[@]/$man_date/g" node-tracker.1 >%{buildroot}%{_mandir}/man1/node-tracker.1
+    echo '%{_mandir}/man1/node-tracker.1*' >>bin.files
+fi
 
 # Presets, not enable: Fedora's default preset leaves the units disabled.
 %post
@@ -69,9 +79,8 @@ bash %{SOURCE1} deploy/systemd %{buildroot}%{_unitdir} %{buildroot}%{_userunitdi
 %systemd_postun %{units}
 %systemd_user_postun %{units}
 
-%files
+%files -f bin.files
 %license LICENSE LICENSE.go-yaml NOTICE.go-yaml
-%{_bindir}/node-tracker
 %{_docdir}/%{name}/
 %{_sysusersdir}/node-tracker.conf
 %{_unitdir}/node-tracker*
