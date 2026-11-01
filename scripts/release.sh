@@ -64,7 +64,7 @@ shopt -s nullglob
 debs=(dist/*.deb) # stable releases only
 shopt -u nullglob
 gh release create "$tag" --repo "$repo" --verify-tag --title "$tag" --generate-notes "${pre[@]}" \
-	--notes "Built with $(go env GOVERSION). Verify: see README, Quick start." \
+	--notes "Built with $(go env GOVERSION). Verify a download: see docs/install.md." \
 	dist/*.tar.gz "${debs[@]}" dist/SHA256SUMS dist/SHA256SUMS.asc
 
 if [[ $tag != *-* ]]; then

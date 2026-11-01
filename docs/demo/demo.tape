@@ -11,7 +11,7 @@ Set Theme "Dracula"
 Hide
 Type "export PATH=$PWD:$PATH PS1='$ ' && mkdir -p ~/.bitcoin ~/.config/node-tracker && cp config.yaml ~/.config/node-tracker/" Enter
 Type "echo __cookie__:demo >~/.bitcoin/.cookie && echo 123456:demo >~/.config/node-tracker/telegram-token && chmod 600 ~/.bitcoin/.cookie ~/.config/node-tracker/telegram-token" Enter
-Type "fake >telegram.log 2>&1 & sleep 1; clear" Enter
+Type "fake >telegram.log 2>&1 & sleep 1; export SSL_CERT_FILE=$PWD/cert.pem; clear" Enter
 Sleep 1.5s
 Show
 

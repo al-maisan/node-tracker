@@ -6,7 +6,7 @@ targets:
       cookie_file: ~/.bitcoin/.cookie
     references:
       - kind: esplora
-        url: http://localhost:3000/api
+        url: https://mempool.space/api
     alert:
       threshold: 3
       for: 2
