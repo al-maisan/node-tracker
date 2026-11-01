@@ -416,6 +416,20 @@ For the opposite case, a local node reached directly and the references and
 Telegram through Tor, see
 [Proxies and Tor](configuration.md#proxies-and-tor).
 
+## Several trackers
+
+Two trackers can watch the same node, e.g. one on the node box and one on
+a VPS, which also notices when the whole box is down
+([Node boxes](node-boxes.md)). To tell their messages apart in a shared
+chat, give each a `name` at the top of its config:
+
+```yaml
+name: shb
+```
+
+Every message then starts with it: `[shb] 🔴 orendil is lagging`.
+`node-tracker setup` asks for it, with the host name as the default.
+
 ## Status reports
 
 `node-tracker report` sends a summary of every target to every notifier,
