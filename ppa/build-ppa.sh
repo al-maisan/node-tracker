@@ -110,6 +110,7 @@ for r in "${todo[@]}"; do
 	# The packaging comes from this checkout, the sources from the tag.
 	cp -a "$src/ppa/debian" "$dir/debian"
 	install -m 755 "$src/scripts/install-units.sh" "$dir/debian/install-units.sh"
+	install -m 755 "$src/scripts/deb-layout.sh" "$dir/debian/deb-layout.sh"
 	install -m 644 "$src/deploy/sysusers.d/node-tracker.conf" "$dir/debian/node-tracker.sysusers"
 	sed -i "s/@COMMIT@/$commit/" "$dir/debian/rules"
 	"$src/scripts/pkg-changelog.sh" deb "$tag" "$full" "$r" >"$dir/debian/changelog"

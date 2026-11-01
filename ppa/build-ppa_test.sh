@@ -43,12 +43,4 @@ check "release key signed (subkey)" yes "$(yes_no signed_by_release_key <<<"[GNU
 check "other key rejected" no "$(yes_no signed_by_release_key <<<'[GNUPG:] VALIDSIG ABCD 2026-11-01 0 0 4 0 1 10 00 ABCD')"
 check "bad signature rejected" no "$(yes_no signed_by_release_key <<<"[GNUPG:] BADSIG $k x")"
 
-# install -t fails on a directory: the docs pattern of debian/rules must
-# match only files in this tree (docs/demo/ is a directory).
-root=$(cd "$(dirname "$0")/.." && pwd)
-pat=$(sed -n 's@.*-t \$(DOC)/docs \(docs/[^ ]*\)$@\1@p' "$root/ppa/debian/rules")
-check "rules installs docs/*.md" "docs/*.md" "$pat"
-dirs=$(cd "$root" && for f in $pat; do [[ -f $f ]] || echo "$f"; done)
-check "docs pattern matches only files" "" "$dirs"
-
 exit "$fail"

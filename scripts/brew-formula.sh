@@ -25,7 +25,7 @@ archive() {
 	printf '      url "https://github.com/%s/releases/download/%s/%s"\n      sha256 "%s"\n' "$repo" "$tag" "$name" "$sum"
 }
 
-# Homebrew has no 32-bit ARM, so no linux_armv7. One per line:
+# Homebrew has no 32-bit ARM, so no linux_armv6. One per line:
 # 'a=$(x) b=$(y)' would hide a failing x.
 darwin_arm64=$(archive darwin_arm64)
 darwin_amd64=$(archive darwin_amd64)

@@ -17,7 +17,7 @@ between versions.
 - **On the box**, over ssh. node-tracker reads the RPC on the same host.
   Install it like on any Linux host (see [Quick start](../README.md#quick-start)
   and [Operations](operations.md)); on a Raspberry Pi use the arm64 build, or
-  armv7 on a 32-bit OS.
+  armv6 (armhf for the `.deb`) on a 32-bit OS.
 - **On another machine**, e.g. a VPS. It then also alerts when the whole box
   is down or offline, which a node-tracker on the box can't do. Reach the RPC
   through the box's Tor onion service; the monitoring host needs Tor, see

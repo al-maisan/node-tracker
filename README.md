@@ -99,8 +99,24 @@ The easiest way first:
   It logs to `$(brew --prefix)/var/log/node-tracker.log`. On Linux, also
   run `loginctl enable-linger` to keep it running after you log out.
 
-- **Release archive** (Linux amd64, arm64, armv7 for a 32-bit Raspberry Pi
-  OS; macOS amd64, arm64): download the archive for your system from the
+- **`.deb` package** (Debian, Ubuntu, Raspberry Pi OS; amd64, arm64,
+  armhf; releases after v1.0.0): download the `.deb` for your system from
+  the [releases page](https://github.com/al-maisan/node-tracker/releases)
+  with `SHA256SUMS` and `SHA256SUMS.asc`, verify it as the archive below,
+  then install it (example for arm64):
+
+  ```sh
+  sudo apt install ./node-tracker_1.1.0-1_arm64.deb
+  ```
+
+  It installs `/usr/bin/node-tracker` with its man page, the systemd units
+  (none is enabled) and a `node-tracker` system user. The docs and example
+  config are in `/usr/share/doc/node-tracker`; see
+  [docs/operations.md](docs/operations.md#from-a-package) for the setup.
+
+- **Release archive** (Linux amd64, arm64, armv6 for a 32-bit OS on any
+  Raspberry Pi, armv7 up to v1.0.0; macOS amd64, arm64): download the
+  archive for your system from the
   [releases page](https://github.com/al-maisan/node-tracker/releases),
   together with `SHA256SUMS` and `SHA256SUMS.asc`. Verify and unpack it
   (example for `v1.0.0` on Linux amd64):
