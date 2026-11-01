@@ -48,6 +48,7 @@ test-ppa:
 	ppa/build-ppa_test.sh
 	scripts/pkg-changelog_test.sh
 	scripts/install-units_test.sh
+	scripts/deb_test.sh
 
 test-copr:
 	scripts/copr-build_test.sh

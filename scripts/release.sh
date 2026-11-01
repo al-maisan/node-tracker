@@ -52,9 +52,12 @@ if [[ $tag != *-* ]]; then scripts/brew-formula.sh "$tag" "$repo"; fi
 
 pre=()
 if [[ $tag == *-* ]]; then pre=(--prerelease); fi
+shopt -s nullglob
+debs=(dist/*.deb) # stable releases only
+shopt -u nullglob
 gh release create "$tag" --repo "$repo" --verify-tag --title "$tag" --generate-notes "${pre[@]}" \
 	--notes "Built with $(go env GOVERSION). Verify: see README, Quick start." \
-	dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.asc
+	dist/*.tar.gz "${debs[@]}" dist/SHA256SUMS dist/SHA256SUMS.asc
 
 if [[ $tag != *-* ]]; then
 	tap=${repo%%/*}/homebrew-tap

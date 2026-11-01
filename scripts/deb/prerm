@@ -1,0 +1,9 @@
+#!/bin/sh
+# Copied from the PPA package (debhelper 13.31ubuntu1); scripts/deb.sh puts
+# it in the release .deb.
+set -e
+# Automatically added by dh_installsystemd/13.31ubuntu1
+if [ -z "$DPKG_ROOT" ] && [ "$1" = remove ] && [ -d /run/systemd/system ] ; then
+	deb-systemd-invoke stop 'node-tracker-once.service' 'node-tracker-once.timer' 'node-tracker-report.service' 'node-tracker-report.timer' 'node-tracker.service' >/dev/null || true
+fi
+# End automatically added section

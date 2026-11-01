@@ -18,7 +18,7 @@ make lint         # gofmt, go vet, staticcheck
 make vuln         # govulncheck
 make integration  # needs bitcoind in PATH; starts a throwaway regtest node
 make build        # bin/node-tracker with version, commit and build time
-make dist         # release archives + SHA256SUMS in dist/ (needs GNU tar)
+make dist         # release archives, .deb packages + SHA256SUMS in dist/ (GNU tar, dpkg-deb)
 make test-ppa     # tests of the packaging scripts
 make test-copr    # tests of the COPR scripts
 make srpm         # source RPM of the newest stable tag (rpmbuild)
@@ -39,7 +39,10 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    `main` of `origin`, and the one `v*` tag at HEAD is signed by the
    release key (`RELEASE_KEY`) and is the same tag object on GitHub. Then
    it runs `lint`, `test` and `vuln`, builds `dist/`, signs `SHA256SUMS`
-   with the release key and creates the GitHub release with `gh`.
+   with the release key and creates the GitHub release with `gh`. A
+   stable release also gets `.deb` packages for amd64, arm64 and armhf
+   (`scripts/deb.sh`), so the release machine needs `dpkg-deb` (Fedora:
+   `sudo dnf install dpkg`).
 3. For a stable release (no `-PRE`), `make release` also writes the
    Homebrew formula `dist/node-tracker.rb` (`scripts/brew-formula.sh`) and
    prints a one-liner that commits it to `Formula/node-tracker.rb` in
@@ -51,8 +54,11 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    Ubuntu releases that already have the version are skipped; after a
    packaging fix, `make ppa PPA_REV=2` uploads the next revision with the
    same orig tarball. The packaging (`ppa/debian`,
-   `scripts/install-units.sh`, `deploy/sysusers.d`) comes from the
-   checkout, so a fix also applies to older tags. It needs `go`, `gh`,
+   `scripts/install-units.sh`, `scripts/deb-layout.sh`,
+   `deploy/sysusers.d`) comes from the checkout, so a fix also applies to
+   older tags. The release `.deb` uses the same `deb-layout.sh` and a copy
+   of the PPA package's maintainer scripts (`scripts/deb/`); `make
+   test-ppa` fails when a unit change needs a fresh copy. It needs `go`, `gh`,
    `curl`, `python3`, `debuild` and `dput`.
 5. Run `make copr` to build the tag in COPR `al-maisan/node-tracker`. It
    builds for every Fedora that is released (fedoraproject.org) and still
@@ -73,7 +79,8 @@ Release builds use the official Go toolchain pinned in
 `scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and
 the commit time as build time, so the archives are reproducible:
 `git checkout v1.2.3 && GOTOOLCHAIN=<Go version from node-tracker version> make dist VERSION=v1.2.3 BUILD_TIME=<build time from node-tracker version>`
-gives the same `SHA256SUMS`.
+gives the same `SHA256SUMS` (for the `.deb` files, given the same
+`dpkg-deb` and xz versions).
 
 ## Guidelines
 

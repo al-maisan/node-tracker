@@ -1,0 +1,127 @@
+#!/bin/sh
+# Copied from the PPA package (debhelper 13.31ubuntu1); scripts/deb.sh puts
+# it in the release .deb.
+set -e
+# Automatically added by dh_installsysusers/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+   systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} node-tracker.conf
+fi
+# End automatically added section
+# Automatically added by dh_installsystemduser/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if [ -z "$DPKG_ROOT" ]; then
+		if deb-systemd-helper --user debian-installed 'node-tracker-once.timer' ; then
+			# The following line should be removed in trixie or trixie+1
+			deb-systemd-helper --user unmask 'node-tracker-once.timer' >/dev/null || true
+
+			if deb-systemd-helper --quiet --user was-enabled 'node-tracker-once.timer' ; then
+				# Create new symlinks, if any.
+				deb-systemd-helper --user enable 'node-tracker-once.timer' >/dev/null || true
+			fi
+		fi
+
+		# Update the statefile to add new symlinks (if any), which need to be cleaned
+		# up on purge. Also remove old symlinks.
+		deb-systemd-helper --user update-state 'node-tracker-once.timer' >/dev/null || true
+	fi
+fi
+# End automatically added section
+# Automatically added by dh_installsystemduser/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if [ -z "$DPKG_ROOT" ]; then
+		if deb-systemd-helper --user debian-installed 'node-tracker-report.timer' ; then
+			# The following line should be removed in trixie or trixie+1
+			deb-systemd-helper --user unmask 'node-tracker-report.timer' >/dev/null || true
+
+			if deb-systemd-helper --quiet --user was-enabled 'node-tracker-report.timer' ; then
+				# Create new symlinks, if any.
+				deb-systemd-helper --user enable 'node-tracker-report.timer' >/dev/null || true
+			fi
+		fi
+
+		# Update the statefile to add new symlinks (if any), which need to be cleaned
+		# up on purge. Also remove old symlinks.
+		deb-systemd-helper --user update-state 'node-tracker-report.timer' >/dev/null || true
+	fi
+fi
+# End automatically added section
+# Automatically added by dh_installsystemduser/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if [ -z "$DPKG_ROOT" ]; then
+		if deb-systemd-helper --user debian-installed 'node-tracker.service' ; then
+			# The following line should be removed in trixie or trixie+1
+			deb-systemd-helper --user unmask 'node-tracker.service' >/dev/null || true
+
+			if deb-systemd-helper --quiet --user was-enabled 'node-tracker.service' ; then
+				# Create new symlinks, if any.
+				deb-systemd-helper --user enable 'node-tracker.service' >/dev/null || true
+			fi
+		fi
+
+		# Update the statefile to add new symlinks (if any), which need to be cleaned
+		# up on purge. Also remove old symlinks.
+		deb-systemd-helper --user update-state 'node-tracker.service' >/dev/null || true
+	fi
+fi
+# End automatically added section
+# Automatically added by dh_installsystemd/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if deb-systemd-helper debian-installed 'node-tracker-once.timer'; then
+		# The following line should be removed in trixie or trixie+1
+		deb-systemd-helper unmask 'node-tracker-once.timer' >/dev/null || true
+
+		if deb-systemd-helper --quiet was-enabled 'node-tracker-once.timer'; then
+			# Create new symlinks, if any.
+			deb-systemd-helper enable 'node-tracker-once.timer' >/dev/null || true
+		fi
+	fi
+
+	# Update the statefile to add new symlinks (if any), which need to be cleaned
+	# up on purge. Also remove old symlinks.
+	deb-systemd-helper update-state 'node-tracker-once.timer' >/dev/null || true
+fi
+# End automatically added section
+# Automatically added by dh_installsystemd/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if deb-systemd-helper debian-installed 'node-tracker-report.timer'; then
+		# The following line should be removed in trixie or trixie+1
+		deb-systemd-helper unmask 'node-tracker-report.timer' >/dev/null || true
+
+		if deb-systemd-helper --quiet was-enabled 'node-tracker-report.timer'; then
+			# Create new symlinks, if any.
+			deb-systemd-helper enable 'node-tracker-report.timer' >/dev/null || true
+		fi
+	fi
+
+	# Update the statefile to add new symlinks (if any), which need to be cleaned
+	# up on purge. Also remove old symlinks.
+	deb-systemd-helper update-state 'node-tracker-report.timer' >/dev/null || true
+fi
+# End automatically added section
+# Automatically added by dh_installsystemd/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if deb-systemd-helper debian-installed 'node-tracker.service'; then
+		# The following line should be removed in trixie or trixie+1
+		deb-systemd-helper unmask 'node-tracker.service' >/dev/null || true
+
+		if deb-systemd-helper --quiet was-enabled 'node-tracker.service'; then
+			# Create new symlinks, if any.
+			deb-systemd-helper enable 'node-tracker.service' >/dev/null || true
+		fi
+	fi
+
+	# Update the statefile to add new symlinks (if any), which need to be cleaned
+	# up on purge. Also remove old symlinks.
+	deb-systemd-helper update-state 'node-tracker.service' >/dev/null || true
+fi
+# End automatically added section
+# Automatically added by dh_installsystemd/13.31ubuntu1
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if [ -z "$DPKG_ROOT" ] && [ -d /run/systemd/system ]; then
+		systemctl --system daemon-reload >/dev/null || true
+		if [ -n "$2" ]; then
+			deb-systemd-invoke try-restart 'node-tracker-once.service' 'node-tracker-once.timer' 'node-tracker-report.service' 'node-tracker-report.timer' 'node-tracker.service' >/dev/null || true
+		fi
+	fi
+fi
+# End automatically added section
