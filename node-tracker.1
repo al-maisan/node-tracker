@@ -146,13 +146,21 @@ with
 and kept as
 .IR .bak .
 .PP
-For a node elsewhere it can generate the RPC password and print the
+For an RPC user it first asks whether the user and password exist already,
+as on a node box (Umbrel, myNode, RaspiBlitz, StartOS).
+If not, it can generate the RPC password and print the
 .B rpcauth=
 line for the node's
-.IR bitcoin.conf .
+.IR bitcoin.conf ;
+for a node elsewhere that defaults to no.
 The chat id is found from a
 .B /start
 link with a one\-time code that the user opens in Telegram.
+If Telegram does not answer, it offers to retry, to keep the token
+untested and type the chat id, or to try through Tor
+.RB ( socks5://127.0.0.1:9050 ),
+which then goes into the configuration as the notifier's
+.BR proxy .
 .PP
 The other flags are the answers of
 .BR \-non\-interactive ,
@@ -217,6 +225,13 @@ configuration.
 Telegram chat id or
 .BI @ channel
 (required).
+.TP
+.BI \-telegram\-proxy " url"
+Proxy for Telegram, e.g.
+.BR socks5://127.0.0.1:9050 ,
+written to the configuration as the notifier's
+.BR proxy .
+Default: from the environment.
 .TP
 .B \-install\-service
 Run
@@ -315,7 +330,7 @@ state.
 Proxies for HTTP requests;
 .B socks5://
 works, e.g. for Tor.
-See the configuration reference for per\-endpoint proxies and .onion nodes.
+See the configuration reference for per\-endpoint and per\-notifier proxies and .onion nodes.
 .TP
 .BR XDG_CONFIG_HOME ", " XDG_STATE_HOME
 Base directories of the default configuration and state files.

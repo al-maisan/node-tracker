@@ -10,8 +10,18 @@ the bot's name. It then shows a link like
 group): open it, press Start, and setup finds the chat id. The code is new
 for each run, so old messages and messages from others are ignored. Last,
 it sends a test message. If the bot has a webhook, Telegram does not hand
-out its messages (HTTP 409): remove the webhook, or type the chat id. The
-rest of this page is the manual way.
+out its messages (HTTP 409): remove the webhook, or type the chat id.
+
+If Telegram does not answer (blocked network, or a host that reaches the
+internet only through Tor), setup offers **[r]etry**, **[k]eep the token
+untested** (then type the chat id; send a test later with
+`node-tracker test-notify`), or **[t]ry through Tor**
+(`socks5://127.0.0.1:9050`). With Tor, setup writes
+`proxy: socks5://127.0.0.1:9050` to the notifier, so the service uses it
+too. In a config written by hand, add the same `proxy:` line to the
+notifier (see [Proxies and Tor](configuration.md#proxies-and-tor)).
+
+The rest of this page is the manual way.
 
 ## 1. Create a bot
 

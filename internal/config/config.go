@@ -131,6 +131,7 @@ type Notifier struct {
 	BotTokenEnv  string `yaml:"bot_token_env,omitempty"`
 	ChatID       string `yaml:"chat_id"`
 	APIURL       string `yaml:"api_url,omitempty"` // optional, for a self-hosted Bot API server
+	Proxy        string `yaml:"proxy,omitempty"`   // empty: from the environment
 
 	BotToken Secret `yaml:"-"`
 }
@@ -409,6 +410,10 @@ func (n *Notifier) validate(v *validator, p string) {
 		v.bad(p+".kind", n.Kind, "must be one of %v", NotifierKinds)
 		return
 	}
+	var proxy *url.URL
+	if n.Proxy != "" {
+		proxy = checkProxy(v, p+".proxy", n.Proxy)
+	}
 	switch n.Kind {
 	case KindTelegram:
 		if err := CheckChatID(n.ChatID); err != nil {
@@ -416,8 +421,9 @@ func (n *Notifier) validate(v *validator, p string) {
 		}
 		if n.APIURL == "" {
 			n.APIURL = DefaultTelegramAPI
-		} else {
-			checkURL(v, p+".api_url", n.APIURL, false, false)
+		} else if u := checkURL(v, p+".api_url", n.APIURL, false, false); u != nil && u.Scheme == "http" && proxy != nil && !isLoopback(proxy.Hostname()) {
+			// The proxy is used for loopback too, and would see the token.
+			v.bad(p+".proxy", n.Proxy, "plain http api_url needs a loopback proxy; this one would see the bot token. Use https, or a local proxy")
 		}
 		n.BotToken = resolveSecret(v, p+".bot_token", n.BotTokenFile, n.BotTokenEnv)
 		if err := CheckBotToken(n.BotToken); n.BotToken != "" && err != nil {
@@ -473,6 +479,14 @@ func CheckEndpoint(e Endpoint, what string, kinds []string) (Endpoint, []string,
 	v := &validator{given: true}
 	e.validate(v, what, kinds, &Config{Interval: defaultInterval, Timeout: DefaultTimeout})
 	return e, v.warns, errors.Join(v.errs...)
+}
+
+// CheckProxy is Load's check of a proxy URL. what names it in errors, e.g.
+// "-telegram-proxy".
+func CheckProxy(raw, what string) error {
+	v := &validator{}
+	checkProxy(v, what, raw)
+	return errors.Join(v.errs...)
 }
 
 // CheckName is Load's check of a target or notifier name.

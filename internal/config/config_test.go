@@ -284,6 +284,7 @@ func TestProxy(t *testing.T) {
 		{"no host", "socks5://", `proxy "socks5://": must be scheme://host:port`},
 		{"env var", "socks5://$TOR:9050", `proxy "socks5://$TOR:9050": invalid character "$" in host name; YAML`},
 	}
+	const chat = `    chat_id: "-1001234567890"` + "\n"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _, err := Load(write(t, strings.Replace(valid, node, node+"      proxy: "+tt.proxy+"\n", 1)))
@@ -296,6 +297,22 @@ func TestProxy(t *testing.T) {
 				t.Fatalf("err = %v, want %s", err, tt.want)
 			case err != nil && strings.Contains(err.Error(), "s3cr3tPW"):
 				t.Fatalf("error leaks the password: %v", err)
+			}
+		})
+		t.Run("notifier "+tt.name, func(t *testing.T) {
+			c, _, err := Load(write(t, strings.Replace(valid, chat, chat+"    proxy: "+tt.proxy+"\n", 1)))
+			switch {
+			case tt.want == "" && err != nil:
+				t.Fatal(err)
+			case tt.want == "" && c.Notifiers[0].Proxy != tt.proxy:
+				t.Fatalf("notifier = %+v", c.Notifiers[0])
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), "notifiers[0]."+tt.want)):
+				t.Fatalf("err = %v, want %s", err, tt.want)
+			case err != nil && strings.Contains(err.Error(), "s3cr3tPW"):
+				t.Fatalf("error leaks the password: %v", err)
+			}
+			if err := CheckProxy(tt.proxy, "proxy"); (err == nil) != (tt.want == "") || err != nil && !strings.HasPrefix(err.Error(), tt.want) {
+				t.Fatalf("CheckProxy = %v, want %s", err, tt.want)
 			}
 		})
 	}
@@ -324,6 +341,15 @@ func TestOnion(t *testing.T) {
 		{"not base32", "http://1gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion", "", false, "", "not a v3 onion address"},
 		{"bad proxy", "http://" + onion, "tor://x", false, "", "scheme must be one of"},
 	}
+	t.Run("notifier plain http through a proxy", func(t *testing.T) { // the token must not reach a remote proxy unencrypted
+		for proxy, ok := range map[string]bool{"socks5://10.0.0.2:9050": false, "http://proxy.example:3128": false, "socks5://127.0.0.1:9050": true} {
+			cfg := strings.Replace(valid, `chat_id: "-1001234567890"`, `chat_id: "-1001234567890"`+"\n    api_url: http://127.0.0.1:8081\n    proxy: "+proxy, 1)
+			_, _, err := Load(write(t, cfg))
+			if ok != (err == nil) || !ok && !strings.Contains(err.Error(), `notifiers[0].proxy "`+proxy+`": plain http api_url needs a loopback proxy`) {
+				t.Errorf("%s: err = %v", proxy, err)
+			}
+		}
+	})
 	t.Run("notifier api_url", func(t *testing.T) { // the .onion exemption is for endpoints only
 		cfg := strings.Replace(valid, `chat_id: "-1001234567890"`, `chat_id: "-1001234567890"`+"\n    api_url: http://"+onion, 1)
 		want := "\n" + `notifiers[0].api_url "http://` + onion + `": plain http is only allowed for loopback hosts; use https`

@@ -1,8 +1,12 @@
 package app
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -70,5 +74,33 @@ func TestProxy(t *testing.T) {
 		if got := Proxy(tt.e); got != tt.want || strings.Contains(got, "s3cr3tPW") {
 			t.Errorf("Proxy(%s) = %q, want %q", tt.e.URL, got, tt.want)
 		}
+	}
+}
+
+// A notifier with a proxy sends through it: the API URL here is
+// unreachable, only the proxy answers.
+func TestNotifierProxy(t *testing.T) {
+	seen := make(chan string, 10)
+	proxy := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		seen <- r.Method + " " + r.URL.Host + r.URL.Path
+		fmt.Fprint(rw, `{"ok":true,"result":{"username":"nt_test_bot"}}`)
+	}))
+	defer proxy.Close()
+	th, out := uint64(3), uint64(6)
+	c := &config.Config{
+		Timeout: time.Second,
+		Targets: []config.Target{{Name: "btc", Node: config.Endpoint{Kind: config.KindBitcoind, URL: "http://127.0.0.1:1", CookieFile: "/c"},
+			Alert: config.Alert{Threshold: &th, RecoverThreshold: &th, For: 1}, ReferenceOutlier: &out, Notify: []string{"tg"}}},
+		Notifiers: []config.Notifier{{Name: "tg", Kind: config.KindTelegram, ChatID: "1", BotToken: "1:T", APIURL: "http://127.0.0.1:1", Proxy: proxy.URL}},
+	}
+	m, err := Build(c, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := m.Notifiers["tg"].(interface {
+		CheckToken(context.Context) (string, error)
+	}).CheckToken(context.Background())
+	if err != nil || user != "nt_test_bot" || len(seen) != 1 || <-seen != "GET 127.0.0.1:1/bot1:T/getMe" {
+		t.Fatalf("CheckToken = %q, %v; the proxy saw %d requests", user, err, len(seen))
 	}
 }

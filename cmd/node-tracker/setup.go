@@ -77,6 +77,7 @@ type setupHost struct {
 	install     func(ctx context.Context, out io.Writer, o service.Options) error
 	hostname    func() (string, error)
 	telegramAPI string
+	torProxy    string        // offered when Telegram does not answer
 	poll        time.Duration // one getUpdates long poll
 	waitChat    time.Duration // for the tap on the /start link
 }
@@ -97,6 +98,7 @@ var newSetupHost = func() setupHost {
 		},
 		hostname:    os.Hostname,
 		telegramAPI: config.DefaultTelegramAPI,
+		torProxy:    config.DefaultTorProxy,
 		poll:        30 * time.Second,
 		waitChat:    5 * time.Minute,
 	}
@@ -106,7 +108,7 @@ var newSetupHost = func() setupHost {
 // answers.
 type setupOptions struct {
 	config, name, nodeURL, cookieFile, rpcUser, rpcPasswordFile string
-	proxy, references, preset, tokenFile, chatID                string
+	proxy, references, preset, tokenFile, chatID, telegramProxy string
 	nonInteractive, allowInsecure, installService, force        bool
 }
 
@@ -134,6 +136,7 @@ func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&o.preset, "preset", presets[defaultPreset].name, "alert preset: fast, balanced or quiet")
 	fs.StringVar(&o.tokenFile, "token-file", "", "file holding the Telegram bot token (required)")
 	fs.StringVar(&o.chatID, "chat-id", "", "Telegram chat id or @channel (required)")
+	fs.StringVar(&o.telegramProxy, "telegram-proxy", "", "proxy for Telegram, e.g. "+config.DefaultTorProxy+" (default: from the environment)")
 	fs.BoolVar(&o.installService, "install-service", false, "then run install-service (-user, or -system as root)")
 	fs.BoolVar(&o.force, "force", false, "replace existing files, keeping the old config as .bak")
 	if err := fs.Parse(args); err != nil {
@@ -197,6 +200,7 @@ type wizard struct {
 	out   io.Writer
 	log   *slog.Logger
 	hc    *http.Client
+	tg    *http.Client  // for Telegram, if not hc: see useTelegramProxy
 	lines chan string   // the lines of in, see input
 	done  chan struct{} // closed when setup ends
 	wrote bool          // a file was written
@@ -212,7 +216,8 @@ type answers struct {
 	preset     int
 	token      config.Secret
 	chatID     string
-	chatTested bool // the test message went through
+	chatTested bool   // the test message went through
+	tgProxy    string // of the notifier
 }
 
 func (w *wizard) run(ctx context.Context) (int, error) {
@@ -476,7 +481,7 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 				continue
 			}
 			if err := dialProxy(ctx, p); err != nil {
-				fmt.Fprintf(w.out, "Tor does not answer at %s: %s. Install and start Tor (Debian/Ubuntu: sudo apt install -y tor && sudo systemctl enable --now tor), see docs/operations.md#tor. Enter retries.\n", p, explain.Printable(err.Error()))
+				fmt.Fprintf(w.out, "%s Enter retries.\n", torDown(p, err))
 				continue
 			}
 			break
@@ -503,8 +508,18 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 			}
 		}
 	}
+	// A node box has its own RPC user, and its bitcoin.conf is the box's.
+	remote := !isLoopback(e.URL)
+	have, err := w.yes(ctx, "Do you already have the node's RPC user and password? (Umbrel, myNode, RaspiBlitz, StartOS: yes)", remote)
+	if err != nil {
+		return e, "", err
+	}
+	def := prev.Username
+	if !have {
+		def = cmp.Or(def, "nodetracker")
+	}
 	for {
-		u, err := w.ask(ctx, "RPC user", cmp.Or(prev.Username, "nodetracker"))
+		u, err := w.ask(ctx, "RPC user", def)
 		if err != nil {
 			return e, "", err
 		}
@@ -514,7 +529,10 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 		}
 		fmt.Fprintf(w.out, "The user must match %s\n", rpcUserRE)
 	}
-	gen, err := w.yes(ctx, "Generate a new password and the rpcauth line for the node's bitcoin.conf?", true)
+	gen := false
+	if !have {
+		gen, err = w.yes(ctx, "Generate a new password and the rpcauth line for the node's bitcoin.conf?", !remote)
+	}
 	if err != nil || !gen {
 		for err == nil {
 			var pw config.Secret
@@ -650,16 +668,22 @@ func presetIndex(s string) (int, bool) {
 func (w *wizard) askTelegram(ctx context.Context, a *answers) error {
 	fmt.Fprintln(w.out, "In Telegram, open @BotFather (https://t.me/BotFather), send /newbot and choose a name.\nIt replies with the bot's token. Details: docs/telegram.md.")
 	var user string
-	for {
+	for a.token == "" {
 		tok, err := w.secret(ctx, "Bot token")
 		if err != nil {
 			return err
 		}
-		if user, err = w.checkToken(ctx, tok); err == nil {
-			a.token = tok
-			break
+		if user, err = w.testToken(ctx, a, tok); err != nil {
+			return err
 		}
-		fmt.Fprintln(w.out, err)
+	}
+	if user == "" {
+		fmt.Fprintf(w.out, "Token …%s kept untested. Without Telegram the chat can't be found or tested now: type its id.\n", tail(a.token))
+		var err error
+		if a.chatID, err = w.askChatID(ctx, ""); err == nil {
+			fmt.Fprintln(w.out, "Once Telegram answers, send a test message: node-tracker test-notify")
+		}
+		return err
 	}
 	fmt.Fprintf(w.out, "Bot: @%s (token …%s)\n", user, tail(a.token))
 	for {
@@ -678,8 +702,65 @@ func (w *wizard) askTelegram(ctx context.Context, a *answers) error {
 	}
 }
 
+// testToken checks tok with Telegram. It sets a.token and returns the bot's
+// username if tok is valid, or "" if it is kept untested; a.token stays
+// empty if tok is rejected. If Telegram does not answer, it offers to retry,
+// to keep tok untested, or to go through Tor (or back, without it).
+func (w *wizard) testToken(ctx context.Context, a *answers, tok config.Secret) (string, error) {
+	for check := true; ; {
+		if check {
+			user, err := w.checkToken(ctx, tok)
+			if err == nil {
+				a.token = tok
+				return user, nil
+			}
+			fmt.Fprintln(w.out, err)
+			if !errors.Is(err, errTelegramDown) {
+				return "", nil
+			}
+		}
+		q, opts := "[r]etry, [k]eep the token untested, or [t]ry through Tor ("+w.torProxy+")?", "rkt"
+		if a.tgProxy != "" {
+			q, opts = "[r]etry, [k]eep the token untested, or go [d]irect, without "+a.tgProxy+"?", "rkd"
+		}
+		c, err := w.choose(ctx, q, opts)
+		if err != nil {
+			return "", err
+		}
+		check = true
+		switch c {
+		case 'k':
+			a.token = tok
+			return "", nil
+		case 't':
+			if err := dialProxy(ctx, w.torProxy); err != nil {
+				fmt.Fprintln(w.out, torDown(w.torProxy, err))
+				check = false
+				continue
+			}
+			err = w.useTelegramProxy(a, w.torProxy)
+		case 'd':
+			err = w.useTelegramProxy(a, "")
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+}
+
+// useTelegramProxy sends the Telegram calls through proxy, which must be
+// valid, or without one for "".
+func (w *wizard) useTelegramProxy(a *answers, proxy string) error {
+	hc, err := app.Client(proxy, w.hc)
+	if err != nil {
+		return err
+	}
+	w.tg, a.tgProxy = hc, proxy
+	return nil
+}
+
 func (w *wizard) bot(tok config.Secret, chatID string) *telegram.Bot {
-	return telegram.New(notifierName, strings.TrimRight(w.telegramAPI, "/"), string(tok), chatID, w.hc)
+	return telegram.New(notifierName, strings.TrimRight(w.telegramAPI, "/"), string(tok), chatID, cmp.Or(w.tg, w.hc))
 }
 
 // checkToken validates tok and returns the bot's username. Its errors say
@@ -752,6 +833,11 @@ func (w *wizard) askChat(ctx context.Context, tok config.Secret, user string) (s
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
+	return w.askChatID(ctx, typed)
+}
+
+// askChatID asks for a chat id until it is valid; typed is a first answer.
+func (w *wizard) askChatID(ctx context.Context, typed string) (string, error) {
 	for ; ; typed = "" {
 		if typed == "" {
 			var err error
@@ -894,6 +980,14 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 		fmt.Fprintln(w.out, "warning: not every reference answered")
 	}
 
+	if o.telegramProxy != "" {
+		if err := config.CheckProxy(o.telegramProxy, "-telegram-proxy"); err != nil {
+			return nil, err
+		}
+		if err := w.useTelegramProxy(a, o.telegramProxy); err != nil {
+			return nil, err
+		}
+	}
 	if a.token, err = readSecret(o.tokenFile); err != nil {
 		return nil, fmt.Errorf("-token-file: %w", err)
 	}
@@ -1067,7 +1161,7 @@ func (w *wizard) render(a *answers, tok, pw string) ([]byte, error) {
 	if a.node.Username != "" {
 		t.Node.PasswordFile = pw
 	}
-	n := config.Notifier{Name: notifierName, Kind: config.KindTelegram, BotTokenFile: tok, ChatID: a.chatID}
+	n := config.Notifier{Name: notifierName, Kind: config.KindTelegram, BotTokenFile: tok, ChatID: a.chatID, Proxy: a.tgProxy}
 	if w.telegramAPI != config.DefaultTelegramAPI {
 		n.APIURL = w.telegramAPI
 	}
@@ -1211,6 +1305,11 @@ func effectiveProxy(e config.Endpoint) string {
 		return p.String()
 	}
 	return config.DefaultTorProxy
+}
+
+// torDown says that Tor does not answer at proxy, and how to fix it.
+func torDown(proxy string, err error) string {
+	return fmt.Sprintf("Tor does not answer at %s: %s. Install and start Tor (Debian/Ubuntu: sudo apt install -y tor && sudo systemctl enable --now tor), see docs/operations.md#tor.", proxy, explain.Printable(err.Error()))
 }
 
 // dialProxy checks that something listens at the proxy's address.
