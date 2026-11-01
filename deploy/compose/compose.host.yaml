@@ -1,0 +1,5 @@
+# bitcoind or Tor on this host: share the host's network, so the config's
+# http://127.0.0.1:8332 and Tor's 127.0.0.1:9050 reach them. Linux only.
+services:
+  node-tracker:
+    network_mode: host

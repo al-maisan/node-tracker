@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 
 # shellcheck source=release-key.sh
 source scripts/release-key.sh
+# shellcheck source=release-lib.sh
+source scripts/release-lib.sh
 # Official toolchain, so anyone can rebuild the same archives. Bump with new
 # Go patch releases.
 export GOTOOLCHAIN=${RELEASE_GO:-go1.26.10}
@@ -17,10 +19,7 @@ die() {
 
 [[ -z $(git status --porcelain) ]] || die "working tree not clean"
 
-url=$(git remote get-url origin)
-repo=${url%.git}
-repo=${repo#*github.com[:/]}
-[[ $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "origin '$url' is not a GitHub repo"
+repo=$(origin_repo) || exit 1
 remote=https://github.com/$repo.git
 
 mapfile -t tags < <(git tag --points-at HEAD 'v*')
@@ -50,6 +49,15 @@ gpg --status-fd 1 --verify dist/SHA256SUMS.asc dist/SHA256SUMS 2>/dev/null | sig
 # failure stops the release.
 if [[ $tag != *-* ]]; then scripts/brew-formula.sh "$tag" "$repo"; fi
 
+# The container image gets stable releases only. Built and the login
+# checked before publishing, so a failure stops the release; pushed after
+# (push-image.sh).
+if [[ $tag != *-* ]]; then
+	login=$(ghcr_login) || exit 1
+	echo "release: pushing the image to ghcr.io as $login after the GitHub release"
+	IMAGE_SOURCE=https://github.com/$repo scripts/image.sh "$tag" dist dist/image
+fi
+
 pre=()
 if [[ $tag == *-* ]]; then pre=(--prerelease); fi
 shopt -s nullglob
@@ -64,4 +72,7 @@ if [[ $tag != *-* ]]; then
 	echo "release: publish the formula to $tap:"
 	printf 'd=$(mktemp -d) && git clone https://github.com/%s.git "$d" && mkdir -p "$d/Formula" && cp %q "$d/Formula/" && git -C "$d" add Formula/node-tracker.rb && git -C "$d" commit -m "node-tracker %s" && git -C "$d" push\n' \
 		"$tap" "$PWD/dist/node-tracker.rb" "$tag"
+	# Last: the release is out, so a failed push only needs a rerun of this.
+	scripts/push-image.sh "$tag" ||
+		die "the image push failed, the rest of the release is done; fix the cause, then run: make push-image TAG=$tag"
 fi

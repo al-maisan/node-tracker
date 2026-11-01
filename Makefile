@@ -6,7 +6,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.
 TAG        ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null)
 RPM_DIR    := $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/node-tracker/rpmbuild
 
-.PHONY: build dist release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
+.PHONY: build dist image push-image test-image release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/node-tracker ./cmd/node-tracker
@@ -14,6 +14,21 @@ build:
 # Release archives + SHA256SUMS in dist/.
 dist:
 	VERSION='$(VERSION)' LDFLAGS='$(LDFLAGS)' scripts/dist.sh
+
+# Multi-arch container image of the archives in dist/, as an OCI layout in
+# dist/image and as localhost/node-tracker:VERSION. Needs podman or docker.
+image:
+	scripts/image.sh '$(VERSION)' dist dist/image
+
+# Rebuilds the image of stable TAG from its signed release assets and pushes
+# it to ghcr.io; 'make release' runs it. Needs a clean checkout of TAG.
+push-image:
+	scripts/push-image.sh '$(TAG)'
+
+# Builds the image from test binaries and runs it; skipped without podman
+# or docker. Needs network for the CA bundle unless it is cached.
+test-image:
+	scripts/image_test.sh
 
 # Needs a signed tag at HEAD, pushed to origin; signs SHA256SUMS with gpg.
 release:
@@ -49,6 +64,7 @@ test-ppa:
 	scripts/pkg-changelog_test.sh
 	scripts/install-units_test.sh
 	scripts/deb_test.sh
+	scripts/push-image_test.sh
 
 test-copr:
 	scripts/copr-build_test.sh

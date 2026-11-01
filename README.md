@@ -159,6 +159,11 @@ The easiest way first:
   The archive holds the binary, its man page (`node-tracker.1`), this
   README, the docs, the systemd units and an example config.
 
+- **Container image** (Linux amd64, arm64, arm/v6; releases after
+  v1.1.0): `ghcr.io/al-maisan/node-tracker`, built from the release
+  archives. Run it with the Compose file in [deploy/compose](deploy/compose);
+  see [docs/operations.md](docs/operations.md#container).
+
 - **Go 1.26+:**
 
   ```sh

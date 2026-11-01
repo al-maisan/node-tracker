@@ -178,6 +178,101 @@ same way, using the `*-once.*` units.
 
 See [deploy/cron/crontab.example](../deploy/cron/crontab.example).
 
+## Container
+
+Each stable release after v1.1.0 has a container image for linux/amd64,
+linux/arm64 and linux/arm/v6 (any Raspberry Pi):
+`ghcr.io/al-maisan/node-tracker:v1.2.3`, and `:latest` for the newest. It
+holds only the binary of the signed release archive and Mozilla's CA
+certificates, and runs `node-tracker run` as user 65532 with:
+
+- the config at `/config/config.yaml`, mounted read-only;
+- the state in the volume `/state`;
+- secrets from files (`*_file`, e.g. `/run/secrets/telegram-token`) or
+  environment variables (`*_env`).
+
+There is no local bitcoind to detect in the container, so set `node`, with
+`username` + `password_file` (a cookie file would have to be readable by
+user 65532). Paths in the config are paths in the container:
+
+```yaml
+targets:
+  - name: my-node
+    node:
+      kind: bitcoind
+      url: http://127.0.0.1:8332
+      username: tracker
+      password_file: /run/secrets/node-rpc-password
+notifiers:
+  - name: telegram
+    kind: telegram
+    bot_token_file: /run/secrets/telegram-token
+    chat_id: "123456789"
+```
+
+[deploy/compose](../deploy/compose) (also in the release archive) has a
+Compose file with a read-only root, no capabilities and
+`no-new-privileges`. Put it in a directory with `config.yaml` and a
+`secrets/` directory with one file per secret:
+
+```sh
+mkdir -p node-tracker/secrets && cd node-tracker && cp <release archive>/deploy/compose/compose*.yaml .
+(umask 077 && cat > secrets/telegram-token)   # paste the token, Enter, Ctrl-D; the same for node-rpc-password
+```
+
+User 65532 in the container must own the secrets. Which host user that
+is depends on how the containers run:
+
+| Containers run by | Command |
+|---|---|
+| root (docker, or `sudo podman`) | `sudo chown -R 65532:65532 secrets` |
+| you, with podman (rootless) | `podman unshare chown -R 65532:65532 secrets` |
+| you, with rootless docker (`docker info` shows `rootless`) | `nsenter -U --preserve-credentials -t "$(cat "$XDG_RUNTIME_DIR/docker.pid")" chown -R 65532:65532 secrets` |
+
+Then check the setup and start it:
+
+```sh
+docker compose run --rm --entrypoint /node-tracker node-tracker check -config /config/config.yaml
+docker compose up -d
+```
+
+- **bitcoind or Tor on the same host:** add
+  `-f compose.yaml -f compose.host.yaml` to every `docker compose`
+  command. The container then uses the host's network, so
+  `http://127.0.0.1:8332` and the host's Tor at `127.0.0.1:9050` work
+  (Linux only). Without it, `127.0.0.1` is the container itself: a
+  `.onion` node is `NODE_DOWN` with `connect: connection refused` for
+  `127.0.0.1:9050`.
+- **Tor in another container** (no Tor on the host): set
+  `proxy: socks5://<tor container>:9050` on the node and
+  `allow_insecure: true`. A `.onion` URL with plain http is otherwise
+  allowed only through a loopback proxy, because the hop to the proxy
+  carries the RPC credentials in clear; here that hop stays on the
+  Compose network.
+- **Umbrel:** add `-f compose.yaml -f compose.umbrel.yaml` instead. The
+  container joins Umbrel's app network, where bitcoind is
+  `http://10.21.21.8:8332`; set `allow_insecure: true` and the user
+  `umbrel` (see [Umbrel](node-boxes.md#umbrel)). Not tested on an Umbrel
+  yet **(check on your box)**.
+- **A node elsewhere over https or a LAN:** the base file is enough.
+- **podman:** `podman compose` works the same. Without Compose:
+  `podman run -d --name node-tracker --read-only --cap-drop ALL --security-opt no-new-privileges -v ./config.yaml:/config/config.yaml:ro,z -v ./secrets:/run/secrets:ro,z -v node-tracker-state:/state ghcr.io/al-maisan/node-tracker:latest`
+- **Other commands:** the image runs the daemon. For another command,
+  give `--entrypoint /node-tracker` and the paths, e.g. with `docker
+  compose run --rm --entrypoint /node-tracker node-tracker`:
+  `check -config /config/config.yaml`,
+  `test-notify -config /config/config.yaml`,
+  `report -config /config/config.yaml`, or
+  `once -config /config/config.yaml -state /state/state.json` (without
+  `-state` it fails on the read-only root).
+- **Logs:** `docker compose logs -f`.
+- **Upgrades:** `docker compose pull && docker compose up -d`. To pin a
+  release, set `NODE_TRACKER_IMAGE=ghcr.io/al-maisan/node-tracker:v1.2.3`,
+  or `…@sha256:<digest>` for the exact image.
+- **Trust:** the image itself is not signed, but anyone can rebuild it
+  from the signed archives and get the same digest; see
+  [CONTRIBUTING.md](../CONTRIBUTING.md#releasing).
+
 ## Tor
 
 node-tracker can watch a node whose RPC is reachable only as a Tor onion
