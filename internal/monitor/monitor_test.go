@@ -273,3 +273,27 @@ func TestTickReportsPending(t *testing.T) {
 		t.Fatalf("pending = %d, want 1", pending)
 	}
 }
+
+// The node stalls while the public reference is down and the only one left
+// answering is an electrs on the node's host, which stalls with it: that is
+// NO_REFERENCE, not OK.
+func TestLocalReferenceAloneIsNoIndependentView(t *testing.T) {
+	var tick int
+	rec := &recorder{}
+	m := newMonitor(&tick, rec)
+	m.Targets[0].Node = &script{name: "node", steps: []any{100}, tick: &tick}
+	m.Targets[0].Refs = []source.Source{
+		&script{name: "mempool", steps: []any{100, errDown}, tick: &tick},
+		&script{name: "electrs", steps: []any{100}, tick: &tick},
+	}
+	m.Targets[0].Local = []bool{false, true}
+	d := &state.Data{Targets: map[string]health.Target{}}
+	for tick = 0; tick < 3; tick++ {
+		if _, _, err := m.Tick(context.Background(), d, time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := d.Targets["btc"].Current; got != health.NoReference || !reflect.DeepEqual(rec.got, []string{"🟡 btc: no reference reachable"}) {
+		t.Fatalf("state = %s, alerts = %q", got, rec.got)
+	}
+}

@@ -13,6 +13,7 @@ func TestObserve(t *testing.T) {
 	boom := errors.New("boom")
 	node := func(b, h uint64) Reading { return Reading{Source: "node", Blocks: b, Headers: h} }
 	ref := func(name string, h uint64) Reading { return Reading{Source: name, Blocks: h} }
+	local := func(name string, h uint64) Reading { return Reading{Source: name, Blocks: h, Local: true} }
 	tests := []struct {
 		name    string
 		s       Sample
@@ -60,6 +61,31 @@ func TestObserve(t *testing.T) {
 			name: "two references that disagree: the higher one wins",
 			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("mempool", 150), ref("own-electrs", 100)}},
 			want: Observation{NodeSource: "node", State: Lagging, Lag: 50, Node: 100, Tip: 150, TipFrom: "mempool"},
+		},
+		{
+			name: "only a reference on the node's host answers: no independent view",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{{Source: "mempool", Err: boom}, local("own-electrs", 100)}},
+			want: Observation{NodeSource: "node", State: NoReference, Node: 100, Tip: 100, TipFrom: "node", Err: "only references on the node's host answered; boom"},
+		},
+		{
+			name: "a local reference that shows lag still makes it LAGGING",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{{Source: "mempool", Err: boom}, local("own-electrs", 110)}},
+			want: Observation{NodeSource: "node", State: Lagging, Lag: 10, Node: 100, Tip: 110, TipFrom: "own-electrs", Err: "only references on the node's host answered; boom"},
+		},
+		{
+			name: "an independent reference answers: OK",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("mempool", 100), local("own-electrs", 100)}},
+			want: Observation{NodeSource: "node", State: OK, Node: 100, Tip: 100, TipFrom: "node"},
+		},
+		{
+			name: "local references don't outvote an independent one that is ahead",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{local("electrs", 100), local("box-mempool", 100), ref("mempool", 110)}},
+			want: Observation{NodeSource: "node", State: Lagging, Lag: 10, Node: 100, Tip: 110, TipFrom: "mempool"},
+		},
+		{
+			name: "only local references configured: trusted as before",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{local("own-electrs", 100)}},
+			want: Observation{NodeSource: "node", State: OK, Node: 100, Tip: 100, TipFrom: "node"},
 		},
 		{
 			name: "reference far above the others is ignored",

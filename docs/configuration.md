@@ -165,14 +165,20 @@ height only. That catches a node that is stuck validating, but not a node
 that has lost contact with the network. A warning is logged in that case.
 Two independent references are a good default, three are better. The tip
 is the *highest* height reported, so a reference that is down or behind
-never hides a problem.
+never hides a problem, as long as an independent one answers.
+
+An Esplora reference on the node's host (the same host name, or both on
+loopback), such as your own electrs, is fed by the node and stalls with
+it. It still counts for the tip, but if the target also has independent
+references and none of them answers, the state is `NO_REFERENCE`, not
+`OK`. A config whose only references are such local ones gets a warning.
 
 The *highest* rule has one weakness: a single broken or tampered reference
 (for example plain http with `allow_insecure`) could report a height far
 ahead and keep the target `LAGGING` forever. `reference_outlier` guards
-against that. With **three or more** responding references, a reference
-that is more than that many blocks above *every other reference* is
-ignored. Honest references are within a block or two of each other, so
+against that. With **three or more** responding independent references,
+one that is more than that many blocks above *every other one* is ignored.
+References on the node's host don't vote here. Honest references are within a block or two of each other, so
 this never hides a real lag.
 
 With only two references that disagree, there is no way to tell which one
@@ -180,7 +186,9 @@ is wrong. One of them may be stuck along with your node, e.g. your own
 electrs. So the higher one wins, and you get an alert to look at, never a
 missed lag. The node's own headers are never part of this comparison,
 because an isolated node's headers are behind by definition. To get
-outlier protection, configure three references.
+outlier protection, configure three references. They should not share a
+backend: two references that are stuck at the same height outvote a
+correct one above them.
 
 ### Choosing the thresholds
 

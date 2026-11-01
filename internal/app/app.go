@@ -74,7 +74,7 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 			if err != nil {
 				return nil, fmt.Errorf("target %s: %w", t.Name, err)
 			}
-			mt.Refs = append(mt.Refs, s)
+			mt.Refs, mt.Local = append(mt.Refs, s), append(mt.Local, r.NodeHost)
 		}
 		m.Targets = append(m.Targets, mt)
 	}

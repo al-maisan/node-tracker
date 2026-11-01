@@ -24,7 +24,7 @@ const (
 	OK          State = "OK"           // lag <= threshold
 	Lagging     State = "LAGGING"      // lag > threshold
 	NodeDown    State = "NODE_DOWN"    // the node could not be queried
-	NoReference State = "NO_REFERENCE" // node is up, every reference failed
+	NoReference State = "NO_REFERENCE" // node is up, no independent reference answered
 )
 
 // Rule configures how a target is judged.
@@ -42,6 +42,7 @@ type Reading struct {
 	Headers uint64
 	Chain   string
 	Err     error
+	Local   bool // a reference on the node's host, likely fed by the node: no independent view
 }
 
 // MismatchedChain tells whether ref is known to be on another chain than
@@ -77,7 +78,9 @@ type Observation struct {
 //
 // Precedence: NODE_DOWN, then LAGGING (also when the lag is only known from
 // the node's own headers), then NO_REFERENCE, then OK. A reference on
-// another chain than the node counts as failed.
+// another chain than the node counts as failed. A Local reference may be
+// stuck along with the node, so if the target has independent references,
+// one of them must answer.
 func Observe(s Sample, r Rule, lagging bool) Observation {
 	if s.Node.Err != nil {
 		return Observation{State: NodeDown, NodeSource: s.Node.Source, Err: clip(s.Node.Err.Error())}
@@ -100,12 +103,19 @@ func Observe(s Sample, r Rule, lagging bool) Observation {
 	// the honest one can't be told apart (it may be stuck with the node, e.g.
 	// a local electrs), so the higher one wins. The node's own headers are
 	// not compared, since an isolated node's headers are behind.
-	slices.SortStableFunc(ok, func(a, b Reading) int { return cmp.Compare(b.Tip(), a.Tip()) })
+	// Only independent references vote: Local ones may be stuck with the
+	// node, and must not outvote an independent one that is ahead.
+	byTip := func(a, b Reading) int { return cmp.Compare(b.Tip(), a.Tip()) }
+	local := slices.DeleteFunc(slices.Clone(ok), func(r Reading) bool { return !r.Local })
+	ok = slices.DeleteFunc(ok, func(r Reading) bool { return r.Local })
+	slices.SortStableFunc(ok, byTip)
 	var outliers []string
 	for r.Outlier > 0 && len(ok) >= 3 && ok[0].Tip()-ok[1].Tip() > r.Outlier {
 		outliers, ok = append(outliers, ok[0].Source), ok[1:]
 	}
 	o.Outliers = strings.Join(outliers, ",")
+	ok = append(ok, local...)
+	slices.SortStableFunc(ok, byTip)
 	if len(ok) > 0 && ok[0].Tip() > o.Tip {
 		o.Tip, o.TipFrom = ok[0].Tip(), ok[0].Source
 	}
@@ -116,8 +126,13 @@ func Observe(s Sample, r Rule, lagging bool) Observation {
 	if lagging {
 		limit = r.Recover
 	}
-	if len(s.Refs) > 0 && len(errs) == len(s.Refs) {
+	independent := func(r Reading) bool { return !r.Local }
+	switch {
+	case len(s.Refs) > 0 && len(errs) == len(s.Refs):
 		o.Err = clip(errors.Join(errs...).Error())
+		o.State = NoReference
+	case slices.ContainsFunc(s.Refs, independent) && !slices.ContainsFunc(ok, independent):
+		o.Err = clip(errors.Join(append([]error{errors.New("only references on the node's host answered")}, errs...)...).Error())
 		o.State = NoReference
 	}
 	if o.Lag > limit {

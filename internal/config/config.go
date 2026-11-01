@@ -112,6 +112,7 @@ type Endpoint struct {
 	Password     Secret        `yaml:"-"` // resolved from PasswordFile / PasswordEnv
 	Timeout      time.Duration `yaml:"-"` // derived: per-call timeout of .onion hosts; 0 means Config.Timeout
 	DefaultProxy bool          `yaml:"-"` // derived: Proxy was set to DefaultTorProxy
+	NodeHost     bool          `yaml:"-"` // derived, references: an Esplora server on the node's host, likely fed by the node
 }
 
 // Alert holds the thresholds. Pointers tell "unset" from 0.
@@ -281,6 +282,7 @@ func (c *Config) validate(v *validator, env Env) {
 				v.errf(rp+".url", "duplicate of the node or another reference")
 			}
 			seen[r.URL] = true
+			r.NodeHost = r.Kind == KindEsplora && sameHost(t.Node.URL, r.URL)
 		}
 		if t.ReferenceOutlier == nil {
 			t.ReferenceOutlier = new(uint64)
@@ -288,6 +290,8 @@ func (c *Config) validate(v *validator, env Env) {
 		}
 		if len(t.References) == 0 {
 			v.warns = append(v.warns, p+": no references; lag is measured against the node's own headers only, which can't detect an isolated node")
+		} else if !slices.ContainsFunc(t.References, func(r Endpoint) bool { return !r.NodeHost }) {
+			v.warns = append(v.warns, p+": every reference is an Esplora server on the node's host, which may follow the node when it is stuck; add an independent one, e.g. https://mempool.space/api")
 		}
 		t.Alert.validate(v, p+".alert")
 
@@ -676,6 +680,18 @@ func expandHome(p string) string {
 		return p // the later stat/read reports the unusable path
 	}
 	return filepath.Join(home, p[2:])
+}
+
+// sameHost reports whether URLs a and b name the same host, counting all
+// loopback addresses as one.
+func sameHost(a, b string) bool {
+	ua, err1 := url.Parse(a)
+	ub, err2 := url.Parse(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	ha, hb := strings.ToLower(ua.Hostname()), strings.ToLower(ub.Hostname())
+	return ha != "" && (ha == hb || isLoopback(ha) && isLoopback(hb))
 }
 
 func isOnion(host string) bool { return strings.HasSuffix(strings.ToLower(host), ".onion") }
