@@ -74,6 +74,15 @@ orendil  LAGGING  974079  974085  6    esplora:mempool.space
    `shasum -a 256 --ignore-missing -c SHA256SUMS`. The archive holds the
    binary, this README, the docs, the systemd units and an example config.
 
+   Or, with Homebrew (macOS, Linux amd64/arm64):
+
+   ```sh
+   brew install al-maisan/tap/node-tracker
+   ```
+
+   The docs are then in `$(brew --prefix)/share/doc/node-tracker`, the
+   systemd units and example config in `$(brew --prefix)/share/node-tracker`.
+
    Or, with Go 1.26+:
 
    ```sh

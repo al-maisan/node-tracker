@@ -21,7 +21,8 @@ make build        # bin/node-tracker with version, commit and build time
 make dist         # release archives + SHA256SUMS in dist/ (needs GNU tar)
 ```
 
-CI runs `lint`, `test`, `vuln` and `dist` on every pull request.
+CI runs `lint`, `test`, `vuln` and `dist`, and checks the Homebrew formula
+syntax, on every pull request.
 
 ## Releasing
 
@@ -32,6 +33,10 @@ CI runs `lint`, `test`, `vuln` and `dist` on every pull request.
    release key (`RELEASE_KEY`) and is the same tag object on GitHub. Then
    it runs `lint`, `test` and `vuln`, builds `dist/`, signs `SHA256SUMS`
    with the release key and creates the GitHub release with `gh`.
+3. For a stable release (no `-PRE`), `make release` also writes the
+   Homebrew formula `dist/node-tracker.rb` (`scripts/brew-formula.sh`) and
+   prints a one-liner that commits it to `Formula/node-tracker.rb` in
+   `al-maisan/homebrew-tap`. Check the formula, then run the one-liner.
 
 Release builds use the official Go toolchain pinned in
 `scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and
