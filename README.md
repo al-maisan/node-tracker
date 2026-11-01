@@ -35,7 +35,10 @@ orendil  LAGGING  974079  974085  6    esplora:mempool.space
 ![node-tracker demo: check, test-notify, then two once runs raising a LAGGING alert](docs/demo/demo.gif)
 
 The demo runs against local fakes of bitcoind, Esplora and Telegram; see
-[`docs/demo/`](docs/demo/).
+[`docs/demo/`](docs/demo/). Pointed at the real Telegram, the same run
+delivers this:
+
+![Telegram: the node-tracker test message, then "orendil is lagging" with node height 974,079, network height 974,085 and a lag of 6 blocks](docs/demo/telegram-alert.png)
 
 ## Features
 
