@@ -15,7 +15,7 @@ between versions.
 ## Where to run node-tracker
 
 - **On the box**, over ssh. node-tracker reads the RPC on the same host.
-  Install it like on any Linux host (see [Quick start](../README.md#quick-start)
+  Install it like on any Linux host (see [Install](../README.md#install)
   and [Operations](operations.md)); on a Raspberry Pi use the arm64 build, or
   armv7 on a 32-bit OS.
 - **On another machine**, e.g. a VPS. It then also alerts when the whole box

@@ -22,6 +22,7 @@ import (
 
 	"github.com/al-maisan/node-tracker/deploy"
 	"github.com/al-maisan/node-tracker/internal/config"
+	"github.com/al-maisan/node-tracker/internal/fsx"
 )
 
 // Account is the system user and group of the system units.
@@ -483,7 +484,7 @@ func (in *installer) packaged(files []file) ([]file, error) {
 	}
 	found, same := false, true
 	for _, f := range files {
-		b, err := readRegular(filepath.Join(dir, filepath.Base(f.path)))
+		b, err := fsx.ReadRegular(filepath.Join(dir, filepath.Base(f.path)))
 		if errors.Is(err, fs.ErrNotExist) {
 			same = false
 			continue
@@ -653,7 +654,7 @@ func plan(files []file, force bool) error {
 		if f.data == nil {
 			continue
 		}
-		old, err := readRegular(f.path)
+		old, err := fsx.ReadRegular(f.path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 		case err != nil:
@@ -667,17 +668,6 @@ func plan(files []file, force bool) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func readRegular(path string) ([]byte, error) {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file (a masked unit is a symlink to /dev/null)", path)
-	}
-	return os.ReadFile(path)
 }
 
 func (in *installer) apply(files []file) error {
@@ -747,36 +737,11 @@ func (in *installer) applyOne(f file) error {
 
 // write replaces f.path atomically, keeping the old file as .bak if f.bak.
 func (in *installer) write(f file) error {
-	tmp, err := os.CreateTemp(filepath.Dir(f.path), "."+filepath.Base(f.path)+".*")
-	if err != nil {
-		return err
+	uid, gid := -1, -1
+	if f.owned {
+		uid, gid = in.own.uid, in.own.gid
 	}
-	defer os.Remove(tmp.Name()) // fails harmlessly after the rename
-	_, err = tmp.Write(f.data)
-	if err == nil {
-		err = tmp.Chmod(f.mode.Perm())
-	}
-	if err == nil && f.owned {
-		err = tmp.Chown(in.own.uid, in.own.gid)
-	}
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	if f.bak { // a link, not a rename: f.path exists at every point
-		if err := os.Remove(f.path + ".bak"); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		if err := os.Link(f.path, f.path+".bak"); err != nil {
-			return err
-		}
-	}
-	return os.Rename(tmp.Name(), f.path)
+	return fsx.WriteFile(f.path, f.data, f.mode, uid, gid, f.bak)
 }
 
 // start reloads systemd, enables and starts unit, and shows its status.

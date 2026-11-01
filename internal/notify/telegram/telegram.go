@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 	"unicode/utf16"
 
@@ -17,8 +19,9 @@ import (
 )
 
 const (
-	maxText = 4096 // Telegram's limit, in UTF-16 code units after entity parsing
-	maxBody = 64 << 10
+	maxText        = 4096 // Telegram's limit, in UTF-16 code units after entity parsing
+	maxBody        = 64 << 10
+	maxUpdatesBody = 1 << 20 // up to 100 updates of up to 4096 characters
 )
 
 // Bot sends messages to one chat.
@@ -114,6 +117,73 @@ func (b *Bot) CheckToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("telegram: %w (HTTP %d)", ErrBadToken, status)
 	}
 	return "", fmt.Errorf("telegram: HTTP %d: %s", status, r.Description)
+}
+
+// ErrConflict is Updates' error for HTTP 409: the bot has a webhook, or
+// another program reads its updates.
+var ErrConflict = errors.New("getUpdates conflicts with a webhook or another program reading the bot's updates")
+
+// Update is one update the bot received. Text and Chat are empty for
+// updates that are not messages.
+type Update struct {
+	ID   int64
+	Text string
+	Chat Chat
+}
+
+// Chat is the chat of a message. The names come from Telegram users: they
+// may contain anything.
+type Chat struct {
+	ID        int64  `json:"id"`
+	Type      string `json:"type"` // private, group, supergroup or channel
+	Title     string `json:"title"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+}
+
+// Updates calls getUpdates, which waits up to wait for updates (a long
+// poll). offset is the ID of the first update to return: one more than the
+// last one seen confirms that one and all before it. ctx must outlast wait.
+func (b *Bot) Updates(ctx context.Context, offset int64, wait time.Duration) ([]Update, error) {
+	q := url.Values{"offset": {strconv.FormatInt(offset, 10)}, "timeout": {strconv.Itoa(int(wait.Seconds()))}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.api+"/bot"+b.token+"/getUpdates?"+q.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", httpx.Redact(err))
+	}
+	status, body, err := httpx.Do(b.http, req, maxUpdatesBody)
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		apiResponse
+		Result []struct {
+			UpdateID int64 `json:"update_id"`
+			Message  *struct {
+				Text string `json:"text"`
+				Chat Chat   `json:"chat"`
+			} `json:"message"`
+		} `json:"result"`
+	}
+	jerr := json.Unmarshal(body, &r)
+	switch {
+	case status == http.StatusConflict:
+		return nil, fmt.Errorf("telegram: %w (HTTP 409: %s)", ErrConflict, r.Description)
+	case status == http.StatusUnauthorized || status == http.StatusNotFound:
+		return nil, fmt.Errorf("telegram: %w (HTTP %d)", ErrBadToken, status)
+	case status != http.StatusOK || !r.OK:
+		return nil, fmt.Errorf("telegram: HTTP %d: %s", status, r.Description)
+	case jerr != nil:
+		return nil, fmt.Errorf("telegram: decode getUpdates: %w", jerr)
+	}
+	us := make([]Update, 0, len(r.Result))
+	for _, u := range r.Result {
+		up := Update{ID: u.UpdateID}
+		if u.Message != nil {
+			up.Text, up.Chat = u.Message.Text, u.Message.Chat
+		}
+		us = append(us, up)
+	}
+	return us, nil
 }
 
 func utf16Len(s string) (n int) {

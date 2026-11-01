@@ -32,6 +32,7 @@ const (
 
 	DefaultTelegramAPI = "https://api.telegram.org"
 	DefaultTorProxy    = "socks5://127.0.0.1:9050" // proxy of .onion endpoints without one
+	DefaultTimeout     = 10 * time.Second          // per call, if the config sets no timeout
 )
 
 var (
@@ -43,7 +44,6 @@ var (
 
 const (
 	defaultInterval  = 30 * time.Second
-	defaultTimeout   = 10 * time.Second
 	onionTimeout     = 30 * time.Second // minimum per-call timeout for .onion hosts
 	defaultThreshold = 3
 	defaultRecover   = 1
@@ -72,13 +72,15 @@ type Secret string
 func (Secret) String() string   { return "REDACTED" }
 func (Secret) GoString() string { return `"REDACTED"` }
 
-// Config is the validated configuration.
+// Config is the validated configuration. Empty fields are left out when it
+// is marshalled, as setup does, except targets, node and references: an empty
+// list of references means none.
 type Config struct {
-	Interval  time.Duration `yaml:"interval"`
-	Timeout   time.Duration `yaml:"timeout"`
-	StateFile string        `yaml:"state_file"`
+	Interval  time.Duration `yaml:"interval,omitempty"`
+	Timeout   time.Duration `yaml:"timeout,omitempty"`
+	StateFile string        `yaml:"state_file,omitempty"`
 	Targets   []Target      `yaml:"targets"`
-	Notifiers []Notifier    `yaml:"notifiers"`
+	Notifiers []Notifier    `yaml:"notifiers,omitempty"`
 
 	Detected *Detected `yaml:"-"` // the local bitcoind, if a target's node was left out
 }
@@ -88,9 +90,9 @@ type Target struct {
 	Name             string     `yaml:"name"`
 	Node             Endpoint   `yaml:"node"`
 	References       []Endpoint `yaml:"references"`
-	ReferenceOutlier *uint64    `yaml:"reference_outlier"` // default 6; 0 disables
-	Alert            Alert      `yaml:"alert"`
-	Notify           []string   `yaml:"notify"`
+	ReferenceOutlier *uint64    `yaml:"reference_outlier,omitempty"` // default 6; 0 disables
+	Alert            Alert      `yaml:"alert,omitempty"`
+	Notify           []string   `yaml:"notify,omitempty"`
 
 	DefaultRefs bool `yaml:"-"` // derived: references left out, so the public ones of the chain
 }
@@ -99,12 +101,12 @@ type Target struct {
 type Endpoint struct {
 	Kind          string `yaml:"kind"`
 	URL           string `yaml:"url"`
-	CookieFile    string `yaml:"cookie_file"`
-	Username      string `yaml:"username"`
-	PasswordFile  string `yaml:"password_file"`
-	PasswordEnv   string `yaml:"password_env"`
-	AllowInsecure bool   `yaml:"allow_insecure"`
-	Proxy         string `yaml:"proxy"` // empty: from the environment; for .onion, DefaultTorProxy if the environment has none
+	CookieFile    string `yaml:"cookie_file,omitempty"`
+	Username      string `yaml:"username,omitempty"`
+	PasswordFile  string `yaml:"password_file,omitempty"`
+	PasswordEnv   string `yaml:"password_env,omitempty"`
+	AllowInsecure bool   `yaml:"allow_insecure,omitempty"`
+	Proxy         string `yaml:"proxy,omitempty"` // empty: from the environment; for .onion, DefaultTorProxy if the environment has none
 
 	Name         string        `yaml:"-"` // derived: kind:host
 	Password     Secret        `yaml:"-"` // resolved from PasswordFile / PasswordEnv
@@ -114,19 +116,19 @@ type Endpoint struct {
 
 // Alert holds the thresholds. Pointers tell "unset" from 0.
 type Alert struct {
-	Threshold        *uint64 `yaml:"threshold"`
-	RecoverThreshold *uint64 `yaml:"recover_threshold"`
-	For              int     `yaml:"for"`
+	Threshold        *uint64 `yaml:"threshold,omitempty"`
+	RecoverThreshold *uint64 `yaml:"recover_threshold,omitempty"`
+	For              int     `yaml:"for,omitempty"`
 }
 
 // Notifier is an alert channel.
 type Notifier struct {
 	Name         string `yaml:"name"`
 	Kind         string `yaml:"kind"`
-	BotTokenFile string `yaml:"bot_token_file"`
-	BotTokenEnv  string `yaml:"bot_token_env"`
+	BotTokenFile string `yaml:"bot_token_file,omitempty"`
+	BotTokenEnv  string `yaml:"bot_token_env,omitempty"`
 	ChatID       string `yaml:"chat_id"`
-	APIURL       string `yaml:"api_url"` // optional, for a self-hosted Bot API server
+	APIURL       string `yaml:"api_url,omitempty"` // optional, for a self-hosted Bot API server
 
 	BotToken Secret `yaml:"-"`
 }
@@ -173,7 +175,7 @@ func LoadEnv(path string, env Env) (*Config, []string, error) {
 
 // NoConfigHint tells how to create a config. It follows "no config at
 // <path>; ".
-const NoConfigHint = "copy examples/config.yaml there and edit it; see docs/configuration.md"
+const NoConfigHint = "run 'node-tracker setup' to create one, or copy examples/config.yaml there and edit it; see docs/configuration.md"
 
 // NoConfigError is Load's error for a missing file. It unwraps to
 // fs.ErrNotExist.
@@ -190,6 +192,7 @@ func (e NoConfigError) Unwrap() error { return e.Err }
 type validator struct {
 	errs  []error
 	warns []string
+	given bool // secrets are given in the struct, not read from *_file / *_env
 }
 
 func (v *validator) errf(path, format string, a ...any) {
@@ -218,7 +221,7 @@ func (c *Config) validate(v *validator, env Env) {
 		c.Interval = defaultInterval
 	}
 	if c.Timeout == 0 {
-		c.Timeout = defaultTimeout
+		c.Timeout = DefaultTimeout
 	}
 	if c.Interval < time.Second {
 		v.errf("interval", "must be at least 1s")
@@ -231,8 +234,8 @@ func (c *Config) validate(v *validator, env Env) {
 	for i := range c.Notifiers {
 		n := &c.Notifiers[i]
 		p := fmt.Sprintf("notifiers[%d]", i)
-		if !nameRE.MatchString(n.Name) {
-			v.bad(p+".name", n.Name, "must match %s", nameRE)
+		if err := CheckName(n.Name); err != nil {
+			v.bad(p+".name", n.Name, "%v", err)
 		} else if notifiers[n.Name] {
 			v.errf(p+".name", "duplicate %q", n.Name)
 		}
@@ -247,8 +250,8 @@ func (c *Config) validate(v *validator, env Env) {
 	for i := range c.Targets {
 		t := &c.Targets[i]
 		p := fmt.Sprintf("targets[%d]", i)
-		if !nameRE.MatchString(t.Name) {
-			v.bad(p+".name", t.Name, "must match %s", nameRE)
+		if err := CheckName(t.Name); err != nil {
+			v.bad(p+".name", t.Name, "%v", err)
 		} else if targets[t.Name] {
 			v.errf(p+".name", "duplicate %q", t.Name)
 		}
@@ -364,7 +367,7 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 		case e.CookieFile == "" && !hasUser:
 			v.errf(p, "auth required: cookie_file, or username with password_file/password_env")
 		case hasUser:
-			e.Password = resolveSecret(v, p+".password", e.PasswordFile, e.PasswordEnv)
+			e.Password = v.secret(p+".password", e.PasswordFile, e.PasswordEnv, e.Password)
 		}
 	case KindEsplora:
 		if e.CookieFile != "" || e.Username != "" || e.PasswordFile != "" || e.PasswordEnv != "" {
@@ -402,8 +405,8 @@ func (n *Notifier) validate(v *validator, p string) {
 	}
 	switch n.Kind {
 	case KindTelegram:
-		if !chatIDRE.MatchString(n.ChatID) {
-			v.bad(p+".chat_id", n.ChatID, "must be a numeric chat id or @channelname")
+		if err := CheckChatID(n.ChatID); err != nil {
+			v.bad(p+".chat_id", n.ChatID, "%v", err)
 		}
 		if n.APIURL == "" {
 			n.APIURL = DefaultTelegramAPI
@@ -411,8 +414,8 @@ func (n *Notifier) validate(v *validator, p string) {
 			checkURL(v, p+".api_url", n.APIURL, false, false)
 		}
 		n.BotToken = resolveSecret(v, p+".bot_token", n.BotTokenFile, n.BotTokenEnv)
-		if n.BotToken != "" && strings.ContainsAny(string(n.BotToken), " \t\r\n/?#") {
-			v.errf(p+".bot_token", "contains invalid characters")
+		if err := CheckBotToken(n.BotToken); n.BotToken != "" && err != nil {
+			v.errf(p+".bot_token", "%v", err)
 		}
 	}
 }
@@ -454,6 +457,52 @@ func (v *validator) badPath(path, value, what string) {
 		hint = "; it looks like the bot token itself"
 	}
 	v.errf(path, "must be the path of a file holding the %s (absolute or ~/…), not the %s itself (value not shown)%s", what, what, hint)
+}
+
+// CheckEndpoint validates and defaults e as Load does a target's node
+// (kinds NodeKinds) or reference (ReferenceKinds), in a config with the
+// default interval and timeout. e.Password is used as given: password_file
+// and password_env are not read. what names e in errors, e.g. "node".
+func CheckEndpoint(e Endpoint, what string, kinds []string) (Endpoint, []string, error) {
+	v := &validator{given: true}
+	e.validate(v, what, kinds, &Config{Interval: defaultInterval, Timeout: DefaultTimeout})
+	return e, v.warns, errors.Join(v.errs...)
+}
+
+// CheckName is Load's check of a target or notifier name.
+func CheckName(name string) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("must match %s", nameRE)
+	}
+	return nil
+}
+
+// CheckChatID is Load's check of a Telegram chat_id.
+func CheckChatID(id string) error {
+	if !chatIDRE.MatchString(id) {
+		return errors.New("must be a numeric chat id or @channelname")
+	}
+	return nil
+}
+
+// CheckBotToken is Load's check of a non-empty Telegram bot token: it goes
+// into the API URL's path.
+func CheckBotToken(t Secret) error {
+	if strings.ContainsAny(string(t), " \t\r\n/?#") {
+		return errors.New("contains invalid characters")
+	}
+	return nil
+}
+
+// secret is resolveSecret, or the secret given in the struct if v.given.
+func (v *validator) secret(p, file, env string, given Secret) Secret {
+	if !v.given {
+		return resolveSecret(v, p, file, env)
+	}
+	if given == "" {
+		v.errf(p, "required")
+	}
+	return given
 }
 
 // resolveSecret reads a secret from exactly one of file or env. Secret

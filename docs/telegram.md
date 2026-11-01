@@ -3,6 +3,16 @@
 You need two things: a **bot token**, which lets node-tracker send messages,
 and a **chat id**, which says where the messages go.
 
+`node-tracker setup` does most of this for you: you create the bot (step
+1) and paste its token; setup checks it with Telegram's `getMe` and shows
+the bot's name. It then shows a link like
+`https://t.me/my_node_alerts_bot?start=<code>` (and `?startgroup=` for a
+group): open it, press Start, and setup finds the chat id. The code is new
+for each run, so old messages and messages from others are ignored. Last,
+it sends a test message. If the bot has a webhook, Telegram does not hand
+out its messages (HTTP 409): remove the webhook, or type the chat id. The
+rest of this page is the manual way.
+
 ## 1. Create a bot
 
 1. In Telegram, open a chat with **@BotFather** and send `/newbot`.
@@ -11,10 +21,11 @@ and a **chat id**, which says where the messages go.
 3. BotFather replies with a token like `123456789:AAH…`. Treat it like a
    password: anyone with it can send messages as your bot.
 
-Save the token in a file only you can read:
+Save the token in a file only you can read (`cat` waits for the token:
+paste it, press Enter, then Ctrl-D):
 
 ```sh
-mkdir -p ~/.config/node-tracker && install -m 600 /dev/null ~/.config/node-tracker/telegram-token && $EDITOR ~/.config/node-tracker/telegram-token
+mkdir -p ~/.config/node-tracker && (umask 077 && cat > ~/.config/node-tracker/telegram-token)
 ```
 
 ## 2. Find the chat id

@@ -58,7 +58,7 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 		m.Notifiers[n.Name] = mk(n, hc)
 	}
 	for _, t := range c.Targets {
-		node, err := newSource(t.Node, hc)
+		node, err := NewSource(t.Node, hc)
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", t.Name, err)
 		}
@@ -70,7 +70,7 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 			Notify: t.Notify,
 		}
 		for _, r := range t.References {
-			s, err := newSource(r, hc)
+			s, err := NewSource(r, hc)
 			if err != nil {
 				return nil, fmt.Errorf("target %s: %w", t.Name, err)
 			}
@@ -81,8 +81,9 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 	return m, nil
 }
 
-// newSource uses hc, or its own client if e has a proxy.
-func newSource(e config.Endpoint, hc *http.Client) (source.Source, error) {
+// NewSource is the source of e, which must come from config.Load or
+// config.CheckEndpoint. It uses hc, or its own client if e has a proxy.
+func NewSource(e config.Endpoint, hc *http.Client) (source.Source, error) {
 	mk, ok := sources[e.Kind]
 	if !ok {
 		return nil, fmt.Errorf("source kind %q not implemented", e.Kind)

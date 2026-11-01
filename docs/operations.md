@@ -18,6 +18,8 @@ locked and exit with code 3.
 
 ## systemd system service
 
+`sudo node-tracker setup` writes the config and the secrets to
+`/etc/node-tracker/` and runs `install-service -system` for you. By hand,
 `node-tracker install-service -system` sets it up. Install the binary outside
 `/home` first (the unit has `ProtectHome=yes`), and put the secrets in
 `/etc/node-tracker/`:
@@ -100,7 +102,9 @@ default to Tor); the unit needs nothing. See
 ### From a package
 
 The deb or rpm package has installed the binary, the units and the
-`node-tracker` user, so only the config and the token are left:
+`node-tracker` user, so only the config and the token are left.
+`sudo node-tracker setup` writes them and enables the packaged unit; by
+hand:
 
 ```sh
 sudo install -d -m 750 -o root -g node-tracker /etc/node-tracker
@@ -121,6 +125,7 @@ sudo systemctl enable --now node-tracker
 ## systemd user service
 
 No root needed. The config and state use the XDG defaults.
+`node-tracker setup` ends with `install-service -user`; by hand:
 
 ```sh
 install -m 755 bin/node-tracker ~/.local/bin/
@@ -203,8 +208,10 @@ proxy, an onion service for the RPC port on the node, and an `rpcauth` user
    `rpcwhitelist` below protect it.
 
 2. **On the node**, give node-tracker its own read-only RPC user in
-   `bitcoin.conf` (`rpcauth` line from Bitcoin Core's
-   `share/rpcauth/rpcauth.py nodetracker`), then restart bitcoind:
+   `bitcoin.conf`, then restart bitcoind. `node-tracker setup` on the
+   monitoring host prints these lines with a new password (it also checks
+   Tor's SOCKS port and writes the config of step 5); by hand, the `rpcauth` line comes from Bitcoin Core's
+   `share/rpcauth/rpcauth.py nodetracker`:
 
    ```ini
    rpcauth=nodetracker:<salt>$<hash>
