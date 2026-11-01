@@ -156,8 +156,9 @@ delivers this:
 Ready-to-use units for both modes are in
 [deploy/systemd/system](deploy/systemd/system) and
 [deploy/systemd/user](deploy/systemd/user); a crontab example is in
-[deploy/cron](deploy/cron). [docs/operations.md](docs/operations.md) walks
-through each setup.
+[deploy/cron](deploy/cron); `node-tracker install-service` installs and
+enables the systemd units for you. [docs/operations.md](docs/operations.md)
+walks through each setup.
 
 ## Commands
 
@@ -168,6 +169,7 @@ through each setup.
 | `check` | dry run: print a status table; touches no state, sends no alerts |
 | `report` | send a status report of all targets to every notifier |
 | `test-notify [name]` | send a test message through one notifier or all |
+| `install-service -user\|-system` | write the systemd unit for this binary and enable it (`-timer`, `-force`, `-dry-run`) |
 | `version` | version, git commit, build time, Go version |
 
 Common flags: `-config`, `-state` (`run`/`once` only), `-log-format text|json`,

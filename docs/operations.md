@@ -18,8 +18,51 @@ locked and exit with code 3.
 
 ## systemd system service
 
+`node-tracker install-service -system` sets it up. Install the binary outside
+`/home` first (the unit has `ProtectHome=yes`), and put the secrets in
+`/etc/node-tracker/`:
+
 ```sh
 sudo install -m 755 bin/node-tracker /usr/local/bin/
+sudo install -d -m 750 /etc/node-tracker
+sudo install -m 600 /dev/null /etc/node-tracker/telegram-token   # then put the token in it
+cp examples/config.yaml config.yaml   # edit it; bot_token_file: /etc/node-tracker/telegram-token
+sudo /usr/local/bin/node-tracker install-service -system -config config.yaml -dry-run   # check, then drop -dry-run
+```
+
+`install-service -system`:
+
+- creates the `node-tracker` user and group if they are missing;
+- copies the `-config` file to `/etc/node-tracker/config.yaml` (without
+  `-config` it uses the one already there). Every `*_file` secret in the
+  config must be in `/etc/node-tracker/`. The directory gets mode `750`, the
+  config and the secrets `640`, all owned by `root:node-tracker`;
+- writes `/etc/systemd/system/node-tracker.service` (the shipped unit, with
+  its hardening, and `ExecStart=` set to the binary you ran), then runs
+  `systemctl daemon-reload`, `enable --now` and `status`.
+
+It refuses:
+
+- a binary that is not owned by root, or that is group- or world-writable,
+  or that sits in a directory like that (every directory up to `/` counts);
+- a `cookie_file` under `/home`, `/root` or `/run/user` (`ProtectHome=yes`
+  hides them), and a cookie that the `node-tracker` user can't read through
+  its own groups or a `SupplementaryGroups=` drop-in (see below; ACLs are
+  not considered). bitcoind must be running, so the cookie exists;
+- a unit or config that differs from what it would write. `-force`
+  replaces it and keeps the old one as `.bak`.
+
+If a package installed the unit (`/usr/lib/systemd/system`) and its
+`ExecStart=` already runs this binary, `install-service` writes no unit: it
+installs the config and secrets and enables the packaged unit, so package
+updates of the unit keep working. If the packaged unit runs another binary,
+it stops, because a unit in `/etc/systemd/system` would shadow the packaged
+one; `-force` writes it anyway. `-dry-run` prints the files and commands
+and changes nothing.
+
+By hand, the same is:
+
+```sh
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin node-tracker
 sudo install -d -m 750 -o root -g node-tracker /etc/node-tracker
 sudo install -m 640 -o root -g node-tracker examples/config.yaml /etc/node-tracker/config.yaml
@@ -31,18 +74,28 @@ sudo systemctl daemon-reload && sudo systemctl enable --now node-tracker
 - In the config, point `bot_token_file` at `/etc/node-tracker/telegram-token`.
   The secret files are mode `640` with group `node-tracker`, so node-tracker
   can read them and nobody else can (no permission warning).
-- To read bitcoind's `.cookie`, uncomment `SupplementaryGroups=bitcoin` in
-  the unit (use the group that owns the cookie). The cookie must be readable
-  by that group; on Bitcoin Core 28+ set `rpccookieperms=group` in
-  `bitcoin.conf`.
+- To read bitcoind's `.cookie`, give the service the group that owns it
+  (here `bitcoin`) in a drop-in, before `install-service`:
+  `sudo mkdir -p /etc/systemd/system/node-tracker.service.d && printf '[Service]\nSupplementaryGroups=bitcoin\n' | sudo tee /etc/systemd/system/node-tracker.service.d/groups.conf`
+  (for `-timer`: `node-tracker-once.service.d`), or
+  `sudo usermod -aG bitcoin node-tracker`. A drop-in, unlike an edit of the
+  unit, does not stop `install-service` from updating the unit. The cookie
+  must be readable by that group; on Bitcoin Core 28+ set
+  `rpccookieperms=group` in `bitcoin.conf`.
 - State is kept in `/var/lib/node-tracker/` (`StateDirectory=`).
 - The unit is strongly hardened. Check its exposure score with
   `systemd-analyze security node-tracker`.
 
-**As a timer instead** (one tick every 30 s, no resident process): install
-`node-tracker-once.service` and `node-tracker-once.timer`, then
-`systemctl enable --now node-tracker-once.timer`. To change the interval,
-edit `OnUnitActiveSec=`.
+**As a timer instead** (one tick every 30 s, no resident process): add
+`-timer`, which installs `node-tracker-once.service` and
+`node-tracker-once.timer` and enables the timer (by hand: copy both, then
+`systemctl enable --now node-tracker-once.timer`). Use the timer or the
+daemon, not both. To change the interval, set `OnUnitActiveSec=` in a
+drop-in (`systemctl edit node-tracker-once.timer`).
+
+**Proxy / Tor:** set `proxy:` on the endpoint in the config (`.onion` URLs
+default to Tor); the unit needs nothing. See
+[configuration.md](configuration.md#proxies-and-tor).
 
 ### From a package
 
@@ -71,9 +124,28 @@ No root needed. The config and state use the XDG defaults.
 
 ```sh
 install -m 755 bin/node-tracker ~/.local/bin/
-mkdir -p ~/.config/node-tracker ~/.config/systemd/user
+mkdir -p ~/.config/node-tracker
 cp examples/config.yaml ~/.config/node-tracker/config.yaml           # edit it
-cp deploy/systemd/user/node-tracker.service ~/.config/systemd/user/
+~/.local/bin/node-tracker install-service -user
+```
+
+`install-service -user` checks the config, writes
+`~/.config/systemd/user/node-tracker.service` with `ExecStart=` set to the
+binary you ran (so it can live anywhere, e.g. `~/bin`), runs
+`loginctl enable-linger` (keeps the service running when you are logged
+out; if that needs privileges it tells you to run
+`sudo loginctl enable-linger "$USER"`), then `systemctl --user
+daemon-reload`, `enable --now` and `status`. `-config` makes the unit use
+another config file. `-timer`, `-force` and `-dry-run` work
+as for the system service, and so does a packaged user unit
+(`/usr/lib/systemd/user`): it is enabled instead of written when it runs
+this binary with the same flags.
+
+By hand, the same is:
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/user/node-tracker.service ~/.config/systemd/user/   # fix ExecStart= if the binary is not in ~/.local/bin
 systemctl --user daemon-reload && systemctl --user enable --now node-tracker
 loginctl enable-linger "$USER"     # keep it running when you are logged out
 ```
