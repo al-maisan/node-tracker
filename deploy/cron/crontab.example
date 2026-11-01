@@ -1,0 +1,11 @@
+# node-tracker from cron (crontab -e). cron's smallest step is one minute;
+# for shorter intervals use the systemd timer in deploy/systemd.
+# Uses the default paths: ~/.config/node-tracker/config.yaml and
+# ~/.local/state/node-tracker/state.json. Exit code 4 (not in sync) is
+# expected while a node lags and is already alerted, so it is not an error.
+
+# one tick per minute; logs to syslog/journal
+* * * * *  $HOME/.local/bin/node-tracker once 2>&1 | logger -t node-tracker
+
+# hourly status report (optional)
+5 * * * *  $HOME/.local/bin/node-tracker report 2>&1 | logger -t node-tracker

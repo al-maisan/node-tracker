@@ -1,0 +1,48 @@
+# Daemon mode. Install the binary to /usr/local/bin, the config to
+# /etc/node-tracker/config.yaml, then:
+#   useradd --system --no-create-home --shell /usr/sbin/nologin node-tracker
+#   systemctl enable --now node-tracker.service
+[Unit]
+Description=node-tracker: alert when a blockchain node falls behind the chain tip
+Documentation=https://github.com/al-maisan/node-tracker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/node-tracker run -config /etc/node-tracker/config.yaml -state /var/lib/node-tracker/state.json
+Restart=on-failure
+RestartSec=10s
+User=node-tracker
+Group=node-tracker
+# To read bitcoind's .cookie, add the group that owns it, e.g.:
+#SupplementaryGroups=bitcoin
+StateDirectory=node-tracker
+StateDirectoryMode=0700
+
+# Hardening
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

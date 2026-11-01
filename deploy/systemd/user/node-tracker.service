@@ -1,0 +1,18 @@
+# Daemon mode, as your user. Install the binary to ~/.local/bin and the config
+# to ~/.config/node-tracker/config.yaml, then:
+#   loginctl enable-linger "$USER"   # keep running after logout
+#   systemctl --user enable --now node-tracker.service
+[Unit]
+Description=node-tracker: alert when a blockchain node falls behind the chain tip
+Documentation=https://github.com/al-maisan/node-tracker
+
+[Service]
+ExecStart=%h/.local/bin/node-tracker run
+Restart=on-failure
+RestartSec=10s
+
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

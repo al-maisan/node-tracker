@@ -1,0 +1,9 @@
+[Unit]
+Description=node-tracker: hourly status report
+
+[Timer]
+OnCalendar=hourly
+Persistent=false
+
+[Install]
+WantedBy=timers.target

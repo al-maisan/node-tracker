@@ -1,0 +1,330 @@
+// Command node-tracker watches how far blockchain nodes are behind the chain
+// tip and alerts when a threshold is crossed in either direction.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strings"
+	"syscall"
+	"text/tabwriter"
+	"time"
+
+	"github.com/al-maisan/node-tracker/internal/app"
+	"github.com/al-maisan/node-tracker/internal/config"
+	"github.com/al-maisan/node-tracker/internal/health"
+	"github.com/al-maisan/node-tracker/internal/monitor"
+	"github.com/al-maisan/node-tracker/internal/notify"
+	"github.com/al-maisan/node-tracker/internal/state"
+)
+
+// Set at build time, see Makefile.
+var (
+	version   = "dev"
+	commit    = ""
+	buildTime = ""
+)
+
+// Exit codes.
+const (
+	exitOK        = 0
+	exitFailure   = 1
+	exitUsage     = 2
+	exitLocked    = 3
+	exitNotInSync = 4
+)
+
+const usage = `Usage: node-tracker <command> [flags]
+
+Commands:
+  run           run as a daemon, one tick every interval
+  once          run one tick and exit (for cron or a systemd timer)
+  check         dry run: sample all targets and print a table; no state, no alerts
+  report        send a status report of all targets to every notifier
+  test-notify   send a test message, to one notifier [name] or all
+  version       print version information
+
+Run 'node-tracker <command> -h' for the command's flags.
+`
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
+}
+
+type options struct {
+	config, state, logFormat, logLevel string
+}
+
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, usage)
+		return exitUsage
+	}
+	cmd, args := args[0], args[1:]
+	switch cmd {
+	case "version", "-version", "--version":
+		fmt.Fprintln(stdout, versionString())
+		return exitOK
+	case "help", "-h", "-help", "--help":
+		fmt.Fprint(stdout, usage)
+		return exitOK
+	case "run", "once", "check", "report", "test-notify":
+	default:
+		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
+		return exitUsage
+	}
+
+	var o options
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&o.config, "config", "", "config file (default $XDG_CONFIG_HOME/node-tracker/config.yaml)")
+	if cmd == "run" || cmd == "once" {
+		fs.StringVar(&o.state, "state", "", "state file (default: state_file from config, else $XDG_STATE_HOME/node-tracker/state.json)")
+	}
+	fs.StringVar(&o.logFormat, "log-format", "text", "log format: text or json")
+	fs.StringVar(&o.logLevel, "log-level", "info", "log level: debug, info, warn or error")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
+	}
+	for _, p := range []*string{&o.config, &o.state} {
+		if *p != "" {
+			abs, err := filepath.Abs(*p)
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return exitUsage
+			}
+			*p = abs
+		}
+	}
+	if cmd != "test-notify" && fs.NArg() > 0 || fs.NArg() > 1 {
+		fmt.Fprintf(stderr, "%s: unexpected arguments %v\n", cmd, fs.Args())
+		return exitUsage
+	}
+
+	log, err := newLogger(stderr, o.logFormat, o.logLevel)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitUsage
+	}
+	cfg, m, code := setup(o, log, stderr)
+	if m == nil {
+		return code
+	}
+
+	switch cmd {
+	case "check":
+		return check(ctx, m, stdout, log)
+	case "report":
+		return report(ctx, m, cfg, log)
+	case "test-notify":
+		return testNotify(ctx, m, cfg, fs.Arg(0), log)
+	default:
+		return tick(ctx, cmd, m, cfg, o, log)
+	}
+}
+
+// setup loads the config and builds the monitor. Config errors go to stderr
+// as plain multi-line text, which reads better than a log line.
+func setup(o options, log *slog.Logger, stderr io.Writer) (*config.Config, *monitor.Monitor, int) {
+	path := o.config
+	if path == "" {
+		var err error
+		if path, err = config.DefaultConfigPath(); err != nil {
+			log.Error("no config path", "err", err)
+			return nil, nil, exitUsage
+		}
+	}
+	cfg, warns, err := config.Load(path)
+	for _, w := range warns {
+		log.Warn("config", "warning", w)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "node-tracker: %v\n", err)
+		return nil, nil, exitUsage
+	}
+	m, err := app.Build(cfg, log)
+	if err != nil {
+		log.Error("building monitor failed", "err", err)
+		return nil, nil, exitUsage
+	}
+	return cfg, m, exitOK
+}
+
+// tick runs `run` or `once`.
+func tick(ctx context.Context, cmd string, m *monitor.Monitor, cfg *config.Config, o options, log *slog.Logger) int {
+	path := o.state
+	if path == "" {
+		path = cfg.StateFile
+	}
+	if path == "" {
+		var err error
+		if path, err = config.DefaultStatePath(); err != nil {
+			log.Error("no state path", "err", err)
+			return exitUsage
+		}
+	}
+	s, err := state.Open(path)
+	if errors.Is(err, state.ErrLocked) {
+		log.Warn("another node-tracker is running on this state file, exiting", "state", path)
+		return exitLocked
+	}
+	if err != nil {
+		log.Error("opening state failed", "err", err)
+		return exitFailure
+	}
+	defer s.Close()
+
+	if cmd == "run" {
+		log.Info("node-tracker started", "version", versionString(), "targets", len(m.Targets),
+			"interval", cfg.Interval, "state", path)
+		if err := m.Run(ctx, s, cfg.Interval, cfg.Interval/2); err != nil {
+			log.Error("daemon failed", "err", err)
+			return exitFailure
+		}
+		log.Info("node-tracker stopped")
+		return exitOK
+	}
+
+	d, err := s.Load()
+	if err != nil {
+		log.Error("loading state failed", "err", err)
+		return exitFailure
+	}
+	res, pending, err := m.Tick(ctx, d, 3*cfg.Timeout)
+	if err != nil {
+		log.Warn("interrupted", "err", err)
+		return exitFailure
+	}
+	if err := s.Save(d); err != nil {
+		log.Error("saving state failed", "err", err)
+		return exitFailure
+	}
+	if pending > 0 {
+		// Kept in the outbox for the next run, but make cron/systemd notice.
+		log.Error("alerts not delivered yet", "pending", pending)
+		return exitFailure
+	}
+	return syncCode(res)
+}
+
+func check(ctx context.Context, m *monitor.Monitor, w io.Writer, log *slog.Logger) int {
+	res, err := m.Observe(ctx, nil)
+	if err != nil {
+		log.Warn("interrupted", "err", err)
+		return exitFailure
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "TARGET\tSTATE\tNODE\tTIP\tLAG\tTIP FROM\tERROR")
+	for _, r := range res {
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n", r.Target, r.State, r.Node, r.Tip, r.Lag, r.TipFrom, r.Err)
+	}
+	tw.Flush()
+	return syncCode(res)
+}
+
+func report(ctx context.Context, m *monitor.Monitor, cfg *config.Config, log *slog.Logger) int {
+	res, err := m.Observe(ctx, nil)
+	if err != nil {
+		log.Warn("interrupted", "err", err)
+		return exitFailure
+	}
+	sctx, cancel := context.WithTimeout(ctx, 3*cfg.Timeout)
+	defer cancel()
+	if err := m.Broadcast(sctx, notify.Report(time.Now(), res)); err != nil {
+		log.Error("sending report failed", "err", err)
+		return exitFailure
+	}
+	return syncCode(res)
+}
+
+func testNotify(ctx context.Context, m *monitor.Monitor, cfg *config.Config, name string, log *slog.Logger) int {
+	if name != "" {
+		n, ok := m.Notifiers[name]
+		if !ok {
+			log.Error("unknown notifier", "name", name)
+			return exitUsage
+		}
+		m.Notifiers = map[string]notify.Notifier{name: n}
+	}
+	sctx, cancel := context.WithTimeout(ctx, 3*cfg.Timeout)
+	defer cancel()
+	if err := m.Broadcast(sctx, notify.Test(time.Now())); err != nil {
+		log.Error("test message failed", "err", err)
+		return exitFailure
+	}
+	return exitOK
+}
+
+// syncCode is exitNotInSync if any target was observed in a state other
+// than OK, so cron and scripts can react.
+func syncCode(res []monitor.Result) int {
+	for _, r := range res {
+		if r.State != health.OK {
+			return exitNotInSync
+		}
+	}
+	return exitOK
+}
+
+func newLogger(w io.Writer, format, level string) (*slog.Logger, error) {
+	var lv slog.Level
+	if err := lv.UnmarshalText([]byte(level)); err != nil {
+		return nil, fmt.Errorf("invalid -log-level %q", level)
+	}
+	opts := &slog.HandlerOptions{Level: lv}
+	switch format {
+	case "text":
+		return slog.New(slog.NewTextHandler(w, opts)), nil
+	case "json":
+		return slog.New(slog.NewJSONHandler(w, opts)), nil
+	}
+	return nil, fmt.Errorf("invalid -log-format %q", format)
+}
+
+// versionString is e.g. "node-tracker v1.0.0 (a1b2c3d, built 2026-11-01T08:00:00Z, go1.26.10)".
+// The Makefile injects version, commit and build time. Without them, the
+// module version (go install …@vX.Y.Z) and the embedded VCS data are used.
+func versionString() string {
+	v, c, bt := version, commit, buildTime
+	bi, ok := debug.ReadBuildInfo()
+	if ok && v == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		v = bi.Main.Version // go install module@version
+	}
+	if ok && c == "" {
+		var dirty bool
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				c = s.Value[:min(7, len(s.Value))]
+			case "vcs.modified":
+				dirty = s.Value == "true"
+			}
+		}
+		if dirty && c != "" {
+			c += "-dirty"
+		}
+	}
+	return fmt.Sprintf("node-tracker %s (%s, built %s, %s)", v, orUnknown(c), orUnknown(bt), runtime.Version())
+}
+
+func orUnknown(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "unknown"
+	}
+	return s
+}

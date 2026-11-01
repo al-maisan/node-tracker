@@ -1,0 +1,28 @@
+# Status report to all notifiers, regardless of state. Driven by
+# node-tracker-report.timer; independent of the daemon/once units.
+[Unit]
+Description=node-tracker: status report
+Documentation=https://github.com/al-maisan/node-tracker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/node-tracker report -config /etc/node-tracker/config.yaml
+SuccessExitStatus=4
+User=node-tracker
+Group=node-tracker
+#SupplementaryGroups=bitcoin
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service

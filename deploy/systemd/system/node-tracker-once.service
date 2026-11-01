@@ -1,0 +1,37 @@
+# One tick per activation, driven by node-tracker-once.timer.
+# Use either this timer or node-tracker.service, not both (the state lock
+# would make one of them skip).
+[Unit]
+Description=node-tracker: one tick
+Documentation=https://github.com/al-maisan/node-tracker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/node-tracker once -config /etc/node-tracker/config.yaml -state /var/lib/node-tracker/state.json
+# 3 = another instance holds the lock, 4 = a target is not in sync (already alerted)
+SuccessExitStatus=3 4
+User=node-tracker
+Group=node-tracker
+#SupplementaryGroups=bitcoin
+StateDirectory=node-tracker
+StateDirectoryMode=0700
+TimeoutStartSec=5min
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077

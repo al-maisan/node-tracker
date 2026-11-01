@@ -1,0 +1,16 @@
+# One tick per activation, driven by node-tracker-once.timer.
+# Use either this timer or node-tracker.service, not both (the state lock
+# would make one of them skip).
+[Unit]
+Description=node-tracker: one tick
+Documentation=https://github.com/al-maisan/node-tracker
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/node-tracker once
+# 3 = another instance holds the lock, 4 = a target is not in sync (already alerted)
+SuccessExitStatus=3 4
+TimeoutStartSec=5min
+
+NoNewPrivileges=yes
+UMask=0077
