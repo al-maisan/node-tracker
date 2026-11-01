@@ -172,9 +172,37 @@ See [deploy/cron/crontab.example](../deploy/cron/crontab.example).
 
 node-tracker can watch a node whose RPC is reachable only as a Tor onion
 service, e.g. a home node watched from a VPS. It needs a local Tor SOCKS
-proxy and an `rpcauth` user (the cookie is only readable on the node's host).
+proxy, an onion service for the RPC port on the node, and an `rpcauth` user
+(the cookie is only readable on the node's host).
 
-1. **On the node**, give node-tracker its own read-only RPC user in
+1. **On the node**, create the onion service. Install Tor (Debian/Ubuntu:
+   `sudo apt install -y tor`) and add two lines to its config. If
+   `/etc/tor/torrc` has a `%include /etc/tor/torrc.d/*.conf` line (Fedora
+   has it), write them to `/etc/tor/torrc.d/bitcoin-rpc.conf` (replace
+   `-a /etc/tor/torrc` below with that path); otherwise append them to
+   `/etc/tor/torrc`:
+
+   ```sh
+   printf 'HiddenServiceDir /var/lib/tor/bitcoin-rpc/\nHiddenServicePort 8332 127.0.0.1:8332\n' | sudo tee -a /etc/tor/torrc
+   ```
+
+   Restart Tor and read the onion address:
+
+   ```sh
+   sudo systemctl restart tor && sudo cat /var/lib/tor/bitcoin-rpc/hostname
+   ```
+
+   Tor connects to bitcoind at `127.0.0.1:8332`. With the default
+   `rpcbind` (localhost only) nothing else is needed: localhost is always
+   allowed, whatever `rpcallowip` says. If you set `rpcbind` to another
+   address, also add `rpcbind=127.0.0.1`. Keep the RPC off the clearnet: no
+   `rpcbind=0.0.0.0` on a public host and no router port forward for 8332.
+
+   Treat the onion address like a semi-secret: anyone who has it can reach
+   the RPC port and try to log in. The `rpcauth` password and the
+   `rpcwhitelist` below protect it.
+
+2. **On the node**, give node-tracker its own read-only RPC user in
    `bitcoin.conf` (`rpcauth` line from Bitcoin Core's
    `share/rpcauth/rpcauth.py nodetracker`), then restart bitcoind:
 
@@ -188,7 +216,7 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
    Core otherwise denies every user without one (the cookie, `bitcoin-cli`,
    electrs, LND, …).
 
-2. **On the monitoring host**, install Tor and check that its SOCKS port
+3. **On the monitoring host**, install Tor and check that its SOCKS port
    works (Debian/Ubuntu):
 
    ```sh
@@ -203,7 +231,35 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
    curl -s --socks5-hostname 127.0.0.1:9050 -u "$RPCUSER" --data-binary '{"jsonrpc":"1.0","id":"t","method":"getblockchaininfo","params":[]}' -H 'Content-Type: application/json' "http://$ONION:8332/" | head -c 300
    ```
 
-3. **Config:** write the onion address out in full (YAML does not expand
+4. **Optional, stronger:** lock the onion service to this host with Tor
+   client authorization. Then a leaked onion address is useless without
+   the key: no one else can even reach the RPC port. node-tracker needs no
+   change; Tor on the monitoring host handles it. On the monitoring host,
+   make a key pair:
+
+   ```sh
+   umask 077 && openssl genpkey -algorithm x25519 -out tor-auth.pem && echo "public: $(openssl pkey -in tor-auth.pem -pubout -outform DER | tail -c 32 | base32 | tr -d =)" && echo "private: $(openssl pkey -in tor-auth.pem -outform DER | tail -c 32 | base32 | tr -d =)"
+   ```
+
+   On the node, authorize the public key (set `PUB` to the printed
+   value), then restart Tor:
+
+   ```sh
+   PUB=ABCD…WXYZ; sudo mkdir -p /var/lib/tor/bitcoin-rpc/authorized_clients && echo "descriptor:x25519:$PUB" | sudo tee /var/lib/tor/bitcoin-rpc/authorized_clients/monitor.auth >/dev/null && sudo chown -R --reference=/var/lib/tor/bitcoin-rpc /var/lib/tor/bitcoin-rpc/authorized_clients && sudo systemctl restart tor
+   ```
+
+   On the monitoring host, add `ClientOnionAuthDir /var/lib/tor/onion-auth`
+   to its torrc (as in step 1) and store the private key there (set `PRIV`
+   and `ONION`); this restarts Tor and deletes `tor-auth.pem`:
+
+   ```sh
+   ONION=abc…xyz.onion; PRIV=EFGH…STUV; sudo install -d -m 700 -o "$(stat -c %U /var/lib/tor)" /var/lib/tor/onion-auth && echo "${ONION%.onion}:descriptor:x25519:$PRIV" | sudo tee /var/lib/tor/onion-auth/node.auth_private >/dev/null && sudo chown --reference=/var/lib/tor/onion-auth /var/lib/tor/onion-auth/node.auth_private && sudo chmod 600 /var/lib/tor/onion-auth/node.auth_private && sudo systemctl restart tor && rm tor-auth.pem
+   ```
+
+   The curl check from step 3 must still work; from any other host the
+   onion address no longer answers.
+
+5. **Config:** write the onion address out in full (YAML does not expand
    `$ONION`) and use `username` + `password_file` instead of `cookie_file`.
    Nothing else is needed: for a `.onion` URL, node-tracker goes through
    Tor's SOCKS port `127.0.0.1:9050` (or `HTTP_PROXY`, if set), allows plain
