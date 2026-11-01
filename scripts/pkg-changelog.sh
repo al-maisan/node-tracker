@@ -50,6 +50,18 @@ rpm_escape() {
 	sed 's/%/%%/g'
 }
 
+# Reads a page of GitHub's releases JSON on stdin; prints the tag names of
+# the published ones. Fails on anything else.
+release_tags() {
+	python3 -I -c '
+import json, sys
+for r in json.load(sys.stdin):
+    t = r.get("tag_name")
+    if not r.get("draft") and isinstance(t, str):
+        print(t)
+'
+}
+
 # Prints the RPM %changelog for the release list (newest first) on stdin.
 rpm_changelog() {
 	local -a tags
@@ -81,8 +93,15 @@ if [[ ${BASH_SOURCE[0]} != "$0" ]]; then return 0; fi
 format=$1 tag=$2
 [[ $tag =~ $stable ]] || die "tag '$tag' is not vMAJOR.MINOR.PATCH"
 git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null || die "tag '$tag' not found"
-released=$(gh release list --repo "$repo" --limit 1000 --exclude-drafts --json tagName --jq '.[].tagName') ||
-	die "cannot list the GitHub releases of $repo"
+# Public data: the API needs no login (60 calls an hour per address).
+released=
+for page in {1..10}; do
+	json=$(curl -fsS -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases?per_page=100&page=$page") ||
+		die "cannot list the GitHub releases of $repo"
+	tags=$(release_tags <<<"$json") || die "unexpected answer listing the GitHub releases of $repo"
+	[[ -n $tags ]] || break
+	released+=$tags$'\n'
+done
 releases=$(releases_upto "$tag" <<<"$released")
 for t in $releases; do
 	git rev-parse -q --verify "refs/tags/$t^{commit}" >/dev/null || die "released tag '$t' is not local; fetch the tags first"

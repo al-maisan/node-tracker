@@ -58,7 +58,7 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    `deploy/sysusers.d`) comes from the checkout, so a fix also applies to
    older tags. The release `.deb` uses the same `deb-layout.sh` and a copy
    of the PPA package's maintainer scripts (`scripts/deb/`); `make
-   test-ppa` fails when a unit change needs a fresh copy. It needs `go`, `gh`,
+   test-ppa` fails when a unit change needs a fresh copy. It needs `go`,
    `curl`, `python3`, `debuild` and `dput`.
 5. Run `make copr` to build the tag in COPR `al-maisan/node-tracker`. It
    builds for every Fedora that is released (fedoraproject.org) and still

@@ -4,7 +4,7 @@
 # Usage: ppa/build-ppa.sh <tag> [<ppa-rev>]
 # Without <ppa-rev>, Ubuntu releases that already have the tag's version are
 # skipped. With it, all are built as <version>-1ppa<ppa-rev>~<release>1.
-# Needs go, gh, curl, python3, debuild, dput and the release key.
+# Needs go, curl, python3, debuild, dput and the release key.
 set -euo pipefail
 
 lp_owner=al-maisan

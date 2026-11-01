@@ -16,6 +16,10 @@ flat() { paste -sd' '; }
 check "releases: stable only, up to the tag, newest first" "v1.10.0 v1.9.0 v1.2.0" \
 	"$(printf 'v1.11.0\nv1.2.0\nv1.10.0\nv1.10.0-rc1\nv1.9.0\nlatest\n' | releases_upto v1.10.0 | flat)"
 check "releases: the tag counts before its release" "v1.11.0 v1.10.0" "$(printf 'v1.10.0\n' | releases_upto v1.11.0 | flat)"
+check "release tags: published ones only" "v1.1.0 v1.0.0" \
+	"$(release_tags <<<'[{"tag_name":"v1.1.0","draft":false},{"tag_name":"v1.2.0","draft":true},{"tag_name":null},{"tag_name":"v1.0.0"}]' | flat)"
+check "release tags: none" "" "$(release_tags <<<'[]' | flat)"
+check "release tags: not JSON fails" no "$(release_tags <<<'<html>' >/dev/null 2>&1 && echo yes || echo no)"
 check "releases: none yet" "v1.0.0" "$(releases_upto v1.0.0 </dev/null | flat)"
 
 tmp=$(mktemp -d)
