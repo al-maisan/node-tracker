@@ -4,7 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-release_key=${RELEASE_KEY:-753B6ECF2B458FF3D19D568C1E0A288397AE739E}
+# shellcheck source=release-key.sh
+source scripts/release-key.sh
 # Official toolchain, so anyone can rebuild the same archives. Bump with new
 # Go patch releases.
 export GOTOOLCHAIN=${RELEASE_GO:-go1.26.10}
@@ -12,12 +13,6 @@ export GOTOOLCHAIN=${RELEASE_GO:-go1.26.10}
 die() {
 	echo "release: $*" >&2
 	exit 1
-}
-
-# Reads gpg status lines on stdin; true if the release key (primary key or
-# subkey) made a valid signature.
-signed_by_release_key() {
-	awk -v k="$release_key" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && ($3 == k || $NF == k) { ok = 1 } END { exit !ok }'
 }
 
 [[ -z $(git status --porcelain) ]] || die "working tree not clean"
@@ -32,7 +27,7 @@ mapfile -t tags < <(git tag --points-at HEAD 'v*')
 ((${#tags[@]} == 1)) || die "need exactly one v* tag at HEAD, found ${#tags[@]}: ${tags[*]}"
 tag=${tags[0]}
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "tag '$tag' is not vMAJOR.MINOR.PATCH[-PRE]"
-git verify-tag --raw "$tag" 2>&1 | signed_by_release_key || die "tag '$tag' is not signed by $release_key"
+tag_signed "$tag" . || die "tag '$tag' is not signed by $release_key"
 
 # The remote tag must be this very tag object, not just point to HEAD.
 refs=$(git ls-remote "$remote" "refs/tags/$tag" "refs/tags/$tag^{}")

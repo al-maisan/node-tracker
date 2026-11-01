@@ -1,0 +1,4 @@
+# Go with CGO_ENABLED=0: no C libraries are linked, so none can miss a security update.
+node-tracker: statically-linked-binary [usr/bin/node-tracker]
+# "node-" here is a blockchain node, not Node.js.
+node-tracker: wrong-section-according-to-package-name net => javascript

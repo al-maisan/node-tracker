@@ -91,6 +91,17 @@ delivers this:
    The docs are then in `$(brew --prefix)/share/doc/node-tracker`, the
    systemd units and example config in `$(brew --prefix)/share/node-tracker`.
 
+   Or, on Ubuntu 26.04 (amd64, arm64):
+
+   ```sh
+   sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker
+   ```
+
+   The package installs `/usr/bin/node-tracker`, the systemd units (none
+   is enabled) and a `node-tracker` system user. The docs and example
+   config are in `/usr/share/doc/node-tracker`; see
+   [docs/operations.md](docs/operations.md#from-a-package) for the setup.
+
    Or, with Go 1.26+:
 
    ```sh
