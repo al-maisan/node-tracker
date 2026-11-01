@@ -341,7 +341,8 @@ still `LAGGING`.
 - Logs go to stderr: human-readable text by default, or `-log-format json`
   for log shippers.
 - `info` (default): starts and stops, state changes, delivered alerts.
-- `warn`: a source call failed, a config warning, or a lock conflict.
+- `warn`: a source call failed, a config warning (`check` lists those in
+  its verdict instead), or a lock conflict.
 - `error`: an alert could not be delivered (it will be retried), or saving
   the state failed.
 - `-log-level debug`: one line per sample with all heights.
@@ -396,13 +397,13 @@ overwritten.
 
 | Symptom | Check |
 |---|---|
-| `NODE_DOWN` right after setup | `node-tracker check -log-level debug`; its ERROR column hints at the likely cause. Common causes: wrong URL or port, the cookie isn't readable by node-tracker's user, the RPC user lacks `getblockchaininfo` in `rpcwhitelist`, or the node is still starting (`rpc error -28: Loading block index`). |
-| `NO_REFERENCE` | No independent reference answered: no internet, a proxy is needed, or a typo in the URL. One failing reference out of several only logs a warning, but a reference on the node's host (your own electrs) answering alone is not enough. |
+| `NODE_DOWN` right after setup | `node-tracker check -log-level debug`; its ERROR column hints at the likely cause. Common causes: wrong URL or port, the cookie isn't readable by node-tracker's user (join bitcoind's group: `sudo usermod -aG <group> "$USER"`, log in again; on Bitcoin Core 28+ also set `rpccookieperms=group`), the RPC user lacks `getblockchaininfo` in `rpcwhitelist`, or the node is still starting (`rpc error -28: Loading block index`). |
+| `NO_REFERENCE` | No independent reference answered: no internet, a proxy is needed, or a typo in the URL; `check` shows each error. One failing reference out of several only logs a warning, but a reference on the node's host (your own electrs) answering alone is not enough. |
 | Always `LAGGING` by 1–2 blocks | Normal right after a new block. Raise `threshold` or `for`. |
 | exit code 1 from `once`, log says `alerts not delivered yet` | the notifier is failing; see the error above that line, then run `node-tracker test-notify` |
 | exit code 3 every run | Another node-tracker (daemon or timer) uses the same state file. Run only one. |
 | `state file … is corrupt` | See [The state file](#the-state-file). |
-| no Telegram message | `node-tracker test-notify`, then see [telegram.md](telegram.md). |
+| no Telegram message | `node-tracker test-notify` prints why, with a hint; see [telegram.md](telegram.md). |
 | `plain http is only allowed for loopback and .onion hosts` | Use https, or set `allow_insecure: true` on that endpoint if the path is trusted (LAN). |
 | `.onion` node is `NODE_DOWN` | Is Tor running (`systemctl status tor`)? `check` shows the proxy in use; set `proxy:` if Tor's SOCKS port is not `127.0.0.1:9050`. |
 | `plain http to .onion needs a loopback proxy` | The proxy is on another host, which would see the RPC credentials. Run Tor locally, or set `allow_insecure: true` if that network is trusted. |

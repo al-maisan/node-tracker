@@ -107,6 +107,9 @@ Rules:
 - `NO_REFERENCE` exists so the tracker never goes blind silently.
 - Error text from sources is capped (300 characters) before it reaches the
   state file, logs or alerts. It can come from untrusted nodes.
+- Alerts name states in plain words (`Was: node unreachable`) and put a
+  plain cause of common errors before the raw one
+  (`Error: nothing answers at 127.0.0.1:8332`, then `Details: …`).
 
 The logic lives in package `health`, as two pure functions with no I/O, so
 it is fully unit-testable:
@@ -390,7 +393,12 @@ notifier telegram  token valid (@orendil_bot) · chat not tested → run 'node-t
   refused (bitcoind not running or no `server=1`, wrong port; through a
   proxy: proxy or Tor not running), HTTP 401 (wrong username/password,
   stale cookie), HTTP 403 (`rpcallowip`, `rpcwhitelist`), RPC error -28
-  (node still starting), a `.onion` timeout (Tor not bootstrapped).
+  (node still starting), a `.onion` timeout (Tor not bootstrapped), a
+  missing or unreadable cookie (bitcoind not running; join its group and
+  set `rpccookieperms=group`), and other common errors in plain words.
+  `NO_REFERENCE` gets a hint too (no internet, a proxy needed, wrong URLs).
+- Config warnings are listed in the verdict (`config  ok, 1 warning: …`),
+  not logged.
 - The verdict ends the output. `OK` and `LAGGING` are the monitored state,
   not setup errors. The bot token is checked with Telegram's `getMe`, which
   sends nothing; the chat id is only tested by `test-notify`. The verdict

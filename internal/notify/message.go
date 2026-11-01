@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/al-maisan/node-tracker/internal/explain"
 	"github.com/al-maisan/node-tracker/internal/health"
 )
 
@@ -14,6 +15,14 @@ var subjects = map[health.State]string{
 	health.Lagging:     "🔴 %s is lagging",
 	health.NodeDown:    "⚫ %s: node unreachable",
 	health.NoReference: "🟡 %s: no reference reachable",
+}
+
+// was names a previous state in plain words.
+var was = map[health.State]string{
+	health.OK:          "in sync",
+	health.Lagging:     "lagging",
+	health.NodeDown:    "node unreachable",
+	health.NoReference: "no independent reference answered",
 }
 
 // Render turns a state change into a message.
@@ -25,10 +34,19 @@ func Render(e Event) Message {
 		fmt.Fprintf(&b, "Lag: %d blocks\n", e.Lag)
 	}
 	if e.Err != "" {
-		fmt.Fprintf(&b, "Error: %s\n", e.Err)
+		// The plain cause first; the raw error stays as the details.
+		plain := explain.Text(e.Err)
+		if e.To == health.NoReference {
+			plain = explain.References(e.Err)
+		}
+		if plain != "" {
+			fmt.Fprintf(&b, "Error: %s\nDetails: %s\n", plain, e.Err)
+		} else {
+			fmt.Fprintf(&b, "Error: %s\n", e.Err)
+		}
 	}
-	if e.From != health.Unknown {
-		fmt.Fprintf(&b, "Was: %s\n", e.From)
+	if w, ok := was[e.From]; ok {
+		fmt.Fprintf(&b, "Was: %s\n", w)
 	}
 	fmt.Fprintf(&b, "At: %s", stamp(e.At))
 	return Message{Subject: fmt.Sprintf(subjects[e.To], e.Target), Body: b.String()}

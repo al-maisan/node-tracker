@@ -103,7 +103,7 @@ never read. The port is `rpcport`, else the chain's default: 8332 (main),
 18332 (test), 48332 (testnet4), 38332 (signet), 18443 (regtest). The cookie
 is in the chain's subdirectory, e.g. `~/.bitcoin/signet/.cookie`. If no
 cookie is readable, the most likely path is used, and `check` shows why
-it fails (missing, or permission denied).
+it fails (missing, or permission denied) and how to fix it.
 
 `run` and `check` log the result at start (`once`, `report` and
 `test-notify` only at `-log-level debug`):

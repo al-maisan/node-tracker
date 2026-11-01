@@ -50,6 +50,7 @@ type apiResponse struct {
 
 // Send implements notify.Notifier. The subject is shown in bold. All text is
 // HTML-escaped, so node data (e.g. error strings) can't inject markup.
+// Errors of Bot have no "telegram:" prefix: callers name the notifier.
 func (b *Bot) Send(ctx context.Context, m notify.Message) error {
 	// The limit applies to the unescaped text, measured in UTF-16 units.
 	text := truncate(m.Body, maxText-utf16Len(m.Subject)-2)
@@ -77,7 +78,7 @@ func (b *Bot) Send(ctx context.Context, m notify.Message) error {
 	if status == http.StatusOK && r.OK {
 		return nil
 	}
-	err = fmt.Errorf("telegram: HTTP %d: %s", status, r.Description)
+	err = fmt.Errorf("HTTP %d: %s", status, r.Description)
 	switch {
 	case status == http.StatusTooManyRequests:
 		return &notify.RetryAfter{After: max(time.Duration(r.Parameters.RetryAfter)*time.Second, time.Second), Err: err}
@@ -114,9 +115,9 @@ func (b *Bot) CheckToken(ctx context.Context) (string, error) {
 	case status == http.StatusOK && r.OK:
 		return r.Result.Username, nil
 	case status == http.StatusUnauthorized || status == http.StatusNotFound:
-		return "", fmt.Errorf("telegram: %w (HTTP %d)", ErrBadToken, status)
+		return "", fmt.Errorf("%w (HTTP %d)", ErrBadToken, status)
 	}
-	return "", fmt.Errorf("telegram: HTTP %d: %s", status, r.Description)
+	return "", fmt.Errorf("HTTP %d: %s", status, r.Description)
 }
 
 // ErrConflict is Updates' error for HTTP 409: the bot has a webhook, or
@@ -167,13 +168,13 @@ func (b *Bot) Updates(ctx context.Context, offset int64, wait time.Duration) ([]
 	jerr := json.Unmarshal(body, &r)
 	switch {
 	case status == http.StatusConflict:
-		return nil, fmt.Errorf("telegram: %w (HTTP 409: %s)", ErrConflict, r.Description)
+		return nil, fmt.Errorf("%w (HTTP 409: %s)", ErrConflict, r.Description)
 	case status == http.StatusUnauthorized || status == http.StatusNotFound:
-		return nil, fmt.Errorf("telegram: %w (HTTP %d)", ErrBadToken, status)
+		return nil, fmt.Errorf("%w (HTTP %d)", ErrBadToken, status)
 	case status != http.StatusOK || !r.OK:
-		return nil, fmt.Errorf("telegram: HTTP %d: %s", status, r.Description)
+		return nil, fmt.Errorf("HTTP %d: %s", status, r.Description)
 	case jerr != nil:
-		return nil, fmt.Errorf("telegram: decode getUpdates: %w", jerr)
+		return nil, fmt.Errorf("decode getUpdates: %w", jerr)
 	}
 	us := make([]Update, 0, len(r.Result))
 	for _, u := range r.Result {

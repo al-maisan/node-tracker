@@ -65,7 +65,12 @@ notifiers:
 node-tracker test-notify telegram
 ```
 
-If the message doesn't arrive, the error log says why:
+If the message doesn't arrive, `test-notify` prints why, after the
+notifier's name, with a hint at the cause:
+
+```
+node-tracker: test message failed: telegram: HTTP 400: Bad Request: chat not found (wrong chat id, or the bot was never started in that chat)
+```
 
 | Error | Cause |
 |---|---|

@@ -35,6 +35,8 @@ func init() {
 type world struct {
 	node, tip atomic.Int64
 	tgDown    atomic.Bool
+	chatGone  atomic.Bool  // sendMessage: chat not found
+	getMe     atomic.Value // string: "" answers as nt_test_bot, else this body, with HTTP 200 if it is "ok"
 	rpcFail   atomic.Value // string: "" answers, else "401", "403" or "-28"
 	mu        sync.Mutex
 	chain     string   // the node's
@@ -45,6 +47,7 @@ type world struct {
 func newWorld(t *testing.T) *world {
 	w := &world{chain: "main"}
 	w.rpcFail.Store("")
+	w.getMe.Store("")
 	w.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		rpc := r.URL.Path == "/rpc" || r.URL.Path == "/"
 		switch {
@@ -61,10 +64,19 @@ func newWorld(t *testing.T) *world {
 			fmt.Fprintf(rw, `{"result":{"chain":%q,"blocks":%d,"headers":%d},"error":null}`, chain, w.node.Load(), w.node.Load())
 		case strings.HasSuffix(r.URL.Path, "/api/blocks/tip/height"):
 			fmt.Fprint(rw, w.tip.Load())
+		case r.URL.Path == "/botTOKEN/getMe" && w.getMe.Load() != "":
+			body := w.getMe.Load().(string)
+			if !strings.Contains(body, `"ok":true`) {
+				rw.WriteHeader(http.StatusInternalServerError)
+			}
+			fmt.Fprint(rw, body)
 		case r.URL.Path == "/botTOKEN/getMe":
 			fmt.Fprint(rw, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"nt_test_bot"}}`)
 		case r.URL.Path == "/botTOKEN/sendMessage" && w.tgDown.Load():
 			http.Error(rw, "down", http.StatusBadGateway)
+		case r.URL.Path == "/botTOKEN/sendMessage" && w.chatGone.Load():
+			rw.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(rw, `{"ok":false,"description":"Bad Request: chat not found"}`)
 		case r.URL.Path == "/botTOKEN/sendMessage":
 			var p struct{ Text string }
 			json.NewDecoder(r.Body).Decode(&p)
@@ -155,7 +167,7 @@ func TestCheckReportAndTestNotify(t *testing.T) {
 		t.Fatalf("check: code=%d out=%q", code, out)
 	}
 	for _, want := range []string{
-		"\nconfig       ok\n",
+		"\nconfig       ok, 1 warning: " + localRefs,
 		"\ntarget btc   node reachable (username/password) · references 1/1 · OK is the node's current state\n",
 		"\nnotifier tg  token valid (@nt_test_bot) · chat not tested → run 'node-tracker test-notify tg'\n",
 	} {
@@ -510,8 +522,105 @@ func TestNoConfigAndMissingCookie(t *testing.T) {
 	cookie := filepath.Join(home, ".bitcoin", ".cookie")
 	os.WriteFile(cfg, []byte(strings.Replace(string(b), "username: u, password_env: NT_TEST_PW", "cookie_file: "+cookie, 1)), 0o600)
 	code, out, errs := exec(t, "check", "-config", cfg)
-	if code != exitNotInSync || !strings.Contains(out, "NODE_DOWN") || !strings.Contains(errs, "level=WARN msg=config warning=\"targets[0].node.cookie_file: "+cookie+" does not exist; bitcoind is not started yet") {
-		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	for _, want := range []string{
+		"no such file or directory (is bitcoind running? It writes the cookie on start.",
+		"\nconfig       ok, 2 warnings:\n             - targets[0].node.cookie_file: " + cookie + " does not exist; bitcoind is not started yet",
+	} {
+		if code != exitNotInSync || !strings.Contains(out, want) || strings.Contains(errs, "msg=config") {
+			t.Fatalf("check: code=%d, want %q in\n%s\nand no config warning in\n%s", code, want, out, errs)
+		}
+	}
+	// The warning is still logged by the other commands.
+	if _, _, errs := exec(t, "test-notify", "-config", cfg); !strings.Contains(errs, "level=WARN msg=config warning=") {
+		t.Errorf("test-notify: no config warning in\n%s", errs)
+	}
+
+	// An unreadable cookie gets the fix.
+	if os.Geteuid() == 0 {
+		return // root reads it anyway
+	}
+	os.MkdirAll(filepath.Dir(cookie), 0o700)
+	os.WriteFile(cookie, []byte("__cookie__:x"), 0o000)
+	code, out, _ = exec(t, "check", "-config", cfg)
+	if want := "permission denied (to read it, join its group: sudo usermod -aG "; code != exitNotInSync || !strings.Contains(out, want) ||
+		!strings.Contains(out, "rpccookieperms=group") || !strings.Contains(out, "\nconfig       ok, 1 warning: "+localRefs) {
+		t.Errorf("check: code=%d, want %q in\n%s", code, want, out)
+	}
+}
+
+// check lists several config warnings in the verdict, and hints at the
+// cause of NO_REFERENCE.
+// localRefs is the warning of the fake world: its references and node are
+// all on 127.0.0.1.
+const localRefs = "targets[0]: every reference is an Esplora server on the node's host"
+
+func TestCheckWarningsAndNoReference(t *testing.T) {
+	w := newWorld(t)
+	w.node.Store(938266)
+	cfg, _ := w.config(t)
+	pw := filepath.Join(t.TempDir(), "pw")
+	os.WriteFile(pw, []byte("pw"), 0o644)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	ln.Close()
+	b, _ := os.ReadFile(cfg)
+	c := strings.Replace(string(b), "password_env: NT_TEST_PW", "password_file: "+pw, 1)
+	c = strings.Replace(c, "url: "+w.srv.URL+"/api", "url: http://"+closed+"/api", 1)
+	os.WriteFile(cfg, []byte(c), 0o600)
+	code, out, errs := exec(t, "check", "-config", cfg)
+	for _, want := range []string{
+		"connect: connection refused (no independent reference answered: is this machine online, does it need a proxy, are the URLs right?)\n",
+		"\nconfig       ok, 2 warnings:\n             - targets[0].node.password_file: " + pw + " is accessible by others",
+	} {
+		if code != exitNotInSync || !strings.Contains(out, "NO_REFERENCE") || !strings.Contains(out, want) {
+			t.Errorf("check: code=%d, want %q in\n%s\n%s", code, want, out, errs)
+		}
+	}
+
+	c = strings.Replace(c, "notifiers:", `  - name: eth
+    node: {kind: bitcoind, url: `+w.srv.URL+`/rpc, username: u, password_env: NT_TEST_PW}
+    references: []
+    notify: [tg]
+notifiers:`, 1)
+	os.WriteFile(cfg, []byte(c), 0o600)
+	_, out, _ = exec(t, "check", "-config", cfg)
+	if want := "\nconfig       ok, 3 warnings:\n             - targets[0].node.password_file: "; !strings.Contains(out, want) || !strings.Contains(out, "\n             - targets[1]: no references;") {
+		t.Errorf("check: want %q and targets[1] in\n%s", want, out)
+	}
+}
+
+// test-notify prints why a message failed, with one notifier prefix and a
+// hint.
+func TestTestNotifyFailure(t *testing.T) {
+	w := newWorld(t)
+	cfg, _ := w.config(t)
+	b, _ := os.ReadFile(cfg)
+	os.WriteFile(cfg, []byte(strings.ReplaceAll(string(b), "tg", "telegram")), 0o600)
+	w.chatGone.Store(true)
+	code, _, errs := exec(t, "test-notify", "-config", cfg)
+	want := "node-tracker: test message failed: telegram: HTTP 400: Bad Request: chat not found (wrong chat id, or the bot was never started in that chat)\n"
+	if code != exitFailure || !strings.Contains(errs, want) || strings.Contains(errs, "telegram: telegram:") {
+		t.Fatalf("code=%d, want %q in\n%s", code, want, errs)
+	}
+}
+
+// Telegram's text in check's verdict is filtered, and the bot username
+// checked.
+func TestCheckFiltersTelegramText(t *testing.T) {
+	w := newWorld(t)
+	cfg, _ := w.config(t)
+	for body, want := range map[string]string{
+		`{"ok":true,"result":{"username":"evil\u001b[2J"}}`:         `token not checked: unexpected bot username "evil?[2J"`,
+		`{"ok":false,"description":"down\u001b[31m\u0007 for now"}`: "token not checked: HTTP 500: down?[31m? for now\n",
+	} {
+		w.getMe.Store(body)
+		_, out, _ := exec(t, "check", "-config", cfg)
+		if !strings.Contains(out, want) || strings.ContainsAny(out, "\x1b\x07") {
+			t.Errorf("getMe %s: want %q in\n%q", body, want, out)
+		}
 	}
 }
 

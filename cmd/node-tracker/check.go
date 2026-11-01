@@ -6,18 +6,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
-	"net/url"
-	"strings"
-	"syscall"
+	"strconv"
 	"text/tabwriter"
 
 	"github.com/al-maisan/node-tracker/internal/app"
 	"github.com/al-maisan/node-tracker/internal/config"
+	"github.com/al-maisan/node-tracker/internal/explain"
 	"github.com/al-maisan/node-tracker/internal/health"
 	"github.com/al-maisan/node-tracker/internal/monitor"
 	"github.com/al-maisan/node-tracker/internal/notify/telegram"
-	"github.com/al-maisan/node-tracker/internal/source/bitcoind"
 )
 
 // tokenChecker is a notifier that can validate its credentials without
@@ -26,11 +23,17 @@ type tokenChecker interface {
 	CheckToken(ctx context.Context) (string, error)
 }
 
-// check prints the observed state of every target with hints for node
-// errors, the proxies if any endpoint uses one (or at debug level), and a
-// verdict on the setup. It warns about references on another chain than
-// the node's.
+// check is checkWarns without config warnings, for setup, which prints them
+// itself.
 func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Writer, log *slog.Logger) int {
+	return checkWarns(ctx, m, cfg, nil, w, log)
+}
+
+// checkWarns prints the observed state of every target with hints for node
+// and reference errors, the proxies if any endpoint uses one (or at debug
+// level), and a verdict on the setup that lists the config warnings. It
+// warns about references on another chain than the node's.
+func checkWarns(ctx context.Context, m *monitor.Monitor, cfg *config.Config, warns []string, w io.Writer, log *slog.Logger) int {
 	samples, err := m.Sample(ctx)
 	if err != nil {
 		log.Warn("interrupted", "err", err)
@@ -49,10 +52,14 @@ func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Wri
 	fmt.Fprintln(tw, "TARGET\tSTATE\tNODE\tTIP\tLAG\tTIP FROM\tERROR")
 	for i, r := range res {
 		msg := r.Err
-		if r.State == health.NodeDown {
-			if h := hint(cfg.Targets[i].Node, samples[i].Node.Err); h != "" {
+		switch r.State {
+		case health.NodeDown:
+			e := cfg.Targets[i].Node // r.Err is clipped: keep it
+			if h := explain.Hint(e, app.Proxy(e) != "none", samples[i].Node.Err); h != "" {
 				msg += " (" + h + ")"
 			}
+		case health.NoReference:
+			msg += " (" + explain.References(r.Err) + ")"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n", r.Target, r.State, r.Node, r.Tip, r.Lag, r.TipFrom, msg)
 	}
@@ -77,7 +84,17 @@ func check(ctx context.Context, m *monitor.Monitor, cfg *config.Config, w io.Wri
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(tw, "config\tok")
+	switch len(warns) {
+	case 0:
+		fmt.Fprintln(tw, "config\tok")
+	case 1:
+		fmt.Fprintf(tw, "config\tok, 1 warning: %s\n", warns[0])
+	default:
+		fmt.Fprintf(tw, "config\tok, %d warnings:\n", len(warns))
+		for _, wn := range warns {
+			fmt.Fprintf(tw, "\t- %s\n", wn)
+		}
+	}
 	for i, t := range cfg.Targets {
 		fmt.Fprintf(tw, "target %s\t%s\n", t.Name, targetVerdict(t, samples[i], res[i]))
 	}
@@ -125,36 +142,11 @@ func notifierVerdict(ctx context.Context, m *monitor.Monitor, cfg *config.Config
 	user, err := tc.CheckToken(cctx)
 	switch {
 	case errors.Is(err, telegram.ErrBadToken):
-		return strings.TrimPrefix(err.Error(), "telegram: ") + " · check bot_token_file / bot_token_env"
+		return explain.Printable(err.Error()) + " · check bot_token_file / bot_token_env"
 	case err != nil:
-		return "token not checked: " + err.Error()
+		return "token not checked: " + explain.Telegram(err)
+	case !explain.BotUser.MatchString(user):
+		return "token not checked: unexpected bot username " + strconv.Quote(explain.Printable(user))
 	}
 	return "token valid (@" + user + ") · chat not tested " + run
-}
-
-// hint suggests a likely cause of a node error, or returns "".
-func hint(e config.Endpoint, err error) string {
-	var auth *bitcoind.AuthError
-	var rpc *bitcoind.RPCError
-	var ne net.Error
-	switch {
-	case errors.Is(err, syscall.ECONNREFUSED) && app.Proxy(e) != "none":
-		return "is the proxy running? for .onion: is Tor running?"
-	case errors.Is(err, syscall.ECONNREFUSED):
-		return "is bitcoind running with server=1? RPC ports: main 8332, testnet3 18332, testnet4 48332, signet 38332, regtest 18443"
-	case errors.As(err, &auth) && auth.Status == 401:
-		return "wrong username/password, or a stale cookie"
-	case errors.As(err, &auth):
-		return "not allowed: check rpcallowip, and rpcwhitelist for getblockchaininfo"
-	case errors.As(err, &rpc) && rpc.Code == bitcoind.ErrWarmup:
-		return "bitcoind is starting; try again when it has loaded"
-	case (errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout()) && isOnion(e.URL):
-		return "is Tor running and bootstrapped? .onion calls can be slow"
-	}
-	return ""
-}
-
-func isOnion(raw string) bool {
-	u, err := url.Parse(raw)
-	return err == nil && strings.HasSuffix(strings.ToLower(u.Hostname()), ".onion")
 }

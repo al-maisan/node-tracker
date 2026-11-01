@@ -74,11 +74,18 @@ func TestRender(t *testing.T) {
 	}{
 		{Event{Target: "orendil", From: health.OK, To: health.Lagging, Lag: 5, Node: 938261, Tip: 938266, TipFrom: "esplora:mempool.space", At: at},
 			"🔴 orendil is lagging",
-			[]string{"Node height: 938,261", "Network height: 938,266 (esplora:mempool.space)", "Lag: 5 blocks", "Was: OK", "At: 2026-11-01 08:30:00 UTC"}, ""},
-		{Event{Target: "orendil", To: health.NodeDown, Err: "connection refused", At: at},
-			"⚫ orendil: node unreachable", []string{"Error: connection refused"}, "Lag"},
+			[]string{"Node height: 938,261", "Network height: 938,266 (esplora:mempool.space)", "Lag: 5 blocks", "Was: in sync\n", "At: 2026-11-01 08:30:00 UTC"}, ""},
+		{Event{Target: "orendil", From: health.OK, To: health.NodeDown, At: at,
+			Err: `Post "http://127.0.0.1:1": dial tcp 127.0.0.1:1: connect: connection refused`},
+			"⚫ orendil: node unreachable", []string{"Error: nothing answers at 127.0.0.1:1\nDetails: Post \"http://127.0.0.1:1\": dial tcp 127.0.0.1:1: connect: connection refused\n"}, "Lag"},
+		{Event{Target: "orendil", To: health.NodeDown, Err: "rpc error -1: odd", At: at},
+			"⚫ orendil: node unreachable", []string{"Error: rpc error -1: odd\nAt: "}, "Details"},
+		{Event{Target: "orendil", From: health.NodeDown, To: health.NoReference, Node: 7, Tip: 7, Err: "esplora:mempool.space: HTTP 503", At: at},
+			"🟡 orendil: no reference reachable", []string{"Error: no independent reference answered: ", "Details: esplora:mempool.space: HTTP 503\n", "Was: node unreachable\n"}, "NODE_DOWN"},
 		{Event{Target: "orendil", To: health.OK, From: health.Lagging, At: at},
-			"🟢 orendil is in sync", []string{"Was: LAGGING"}, ""},
+			"🟢 orendil is in sync", []string{"Was: lagging\n"}, "LAGGING"},
+		{Event{Target: "orendil", To: health.Lagging, From: health.NoReference, At: at},
+			"🔴 orendil is lagging", []string{"Was: no independent reference answered\n"}, "NO_REFERENCE"},
 	}
 	for _, tt := range tests {
 		m := Render(tt.e)
