@@ -1,0 +1,14 @@
+# Status report to all notifiers, regardless of state. Driven by
+# node-tracker-report.timer; independent of the daemon/once units.
+[Unit]
+Description=node-tracker: status report
+Documentation=https://github.com/al-maisan/node-tracker
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/node-tracker report
+# 4 = a target is not in sync: the report was sent, the unit did its job
+SuccessExitStatus=4
+
+NoNewPrivileges=yes
+UMask=0077

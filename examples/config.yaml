@@ -1,0 +1,49 @@
+# node-tracker example configuration.
+# Full reference: docs/configuration.md
+#
+# Default location: ~/.config/node-tracker/config.yaml
+# Check it with:    node-tracker check
+
+# Time between ticks in `run` (daemon) mode. Ignored by `once`.
+interval: 30s
+
+# Timeout of every single call to a node, reference or notifier.
+timeout: 10s
+
+# Optional. Default: ~/.local/state/node-tracker/state.json
+# state_file: /var/lib/node-tracker/state.json
+
+targets:
+  - name: my-node                       # used in alerts; letters, digits, . _ -
+    node:
+      kind: bitcoind
+      url: http://127.0.0.1:8332
+      # Bitcoin Core writes this file on start; the user running
+      # node-tracker needs read access to it.
+      cookie_file: /var/lib/bitcoind/.cookie
+      # Or rpcauth credentials (never put the password itself here):
+      # username: tracker
+      # password_file: /etc/node-tracker/rpc-password
+      # password_env: NODE_TRACKER_RPC_PASSWORD
+
+    # Independent views of the chain tip. Use at least two you trust.
+    references:
+      - kind: esplora
+        url: https://mempool.space/api
+      - kind: esplora
+        url: https://blockstream.info/api
+    # reference_outlier: 6    # with 3+ references: ignore one this far above all others (0 = off)
+
+    alert:
+      threshold: 3            # LAGGING when the node is more than 3 blocks behind
+      recover_threshold: 1    # optional; back to OK at 1 block or less (default: threshold)
+      for: 2                  # optional; a change must be seen 2 ticks in a row (default 2)
+
+    notify: [telegram]
+
+notifiers:
+  - name: telegram
+    kind: telegram
+    bot_token_file: ~/.config/node-tracker/telegram-token   # see docs/telegram.md
+    # bot_token_env: NODE_TRACKER_TELEGRAM_TOKEN
+    chat_id: "123456789"
