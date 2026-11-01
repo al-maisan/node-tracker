@@ -39,6 +39,7 @@ const (
 	defaultInterval = 30 * time.Second
 	defaultTimeout  = 10 * time.Second
 	defaultFor      = 2
+	defaultOutlier  = 6
 	maxFor          = 100
 	maxConfigSize   = 1 << 20
 	maxSecretSize   = 4 << 10
@@ -67,11 +68,12 @@ type Config struct {
 
 // Target is one watched node.
 type Target struct {
-	Name       string     `yaml:"name"`
-	Node       Endpoint   `yaml:"node"`
-	References []Endpoint `yaml:"references"`
-	Alert      Alert      `yaml:"alert"`
-	Notify     []string   `yaml:"notify"`
+	Name             string     `yaml:"name"`
+	Node             Endpoint   `yaml:"node"`
+	References       []Endpoint `yaml:"references"`
+	ReferenceOutlier *uint64    `yaml:"reference_outlier"` // default 6; 0 disables
+	Alert            Alert      `yaml:"alert"`
+	Notify           []string   `yaml:"notify"`
 }
 
 // Endpoint is a node or a reference.
@@ -204,6 +206,10 @@ func (c *Config) validate(v *validator) {
 				v.errf(rp+".url", "duplicate of the node or another reference")
 			}
 			seen[r.URL] = true
+		}
+		if t.ReferenceOutlier == nil {
+			t.ReferenceOutlier = new(uint64)
+			*t.ReferenceOutlier = defaultOutlier
 		}
 		if len(t.References) == 0 {
 			v.warns = append(v.warns, p+": no references; lag is measured against the node's own headers only, which can't detect an isolated node")

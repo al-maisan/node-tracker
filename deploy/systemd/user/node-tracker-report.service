@@ -7,6 +7,8 @@ Documentation=https://github.com/al-maisan/node-tracker
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/node-tracker report
+# 4 = a target is not in sync: the report was sent, the unit did its job
 SuccessExitStatus=4
 
 NoNewPrivileges=yes
+UMask=0077

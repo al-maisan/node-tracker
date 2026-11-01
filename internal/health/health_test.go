@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var rule = Rule{Threshold: 3, Recover: 1, For: 2}
+var rule = Rule{Threshold: 3, Recover: 1, For: 2, Outlier: 6}
 
 func TestObserve(t *testing.T) {
 	boom := errors.New("boom")
@@ -55,6 +55,21 @@ func TestObserve(t *testing.T) {
 			name: "node ahead of references is lag 0",
 			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("a", 95)}},
 			want: Observation{NodeSource: "node", State: OK, Node: 100, Tip: 100, TipFrom: "node"},
+		},
+		{
+			name: "reference far above the others is ignored",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("liar", 999999), ref("a", 101), ref("b", 100)}},
+			want: Observation{NodeSource: "node", State: OK, Lag: 1, Node: 100, Tip: 101, TipFrom: "a", Outliers: "liar"},
+		},
+		{
+			name: "single reference is trusted, even far ahead (isolated node)",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("a", 150), {Source: "b", Err: boom}}},
+			want: Observation{NodeSource: "node", State: Lagging, Lag: 50, Node: 100, Tip: 150, TipFrom: "a"},
+		},
+		{
+			name: "references that agree may be far above the node",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("a", 150), ref("b", 149)}},
+			want: Observation{NodeSource: "node", State: Lagging, Lag: 50, Node: 100, Tip: 150, TipFrom: "a"},
 		},
 		{
 			name: "one failed reference is ignored",
@@ -140,13 +155,22 @@ func TestStep(t *testing.T) {
 			},
 		},
 		{
-			name:  "candidate switch resets the counter",
+			name:  "alternating bad states still leave OK, with the latest state",
 			start: Target{Current: OK},
 			For:   2,
 			steps: []step{
 				{Lagging, false, OK},
-				{NodeDown, false, OK},
 				{NodeDown, true, NodeDown},
+			},
+		},
+		{
+			name:  "alternating bad states never stall",
+			start: Target{Current: OK},
+			For:   3,
+			steps: []step{
+				{Lagging, false, OK},
+				{NodeDown, false, OK},
+				{Lagging, true, Lagging},
 			},
 		},
 		{
@@ -208,5 +232,13 @@ func TestHysteresisSurvivesNodeDown(t *testing.T) {
 	tgt, _ = Step(tgt, OK, r, now)
 	if tgt.Lagging() {
 		t.Fatal("OK must reset the lag verdict")
+	}
+}
+
+func TestErrorTextIsSanitized(t *testing.T) {
+	err := errors.Join(errors.New("a\x1b[31mred"), errors.New("b\r\nc"))
+	o := Observe(Sample{Node: Reading{Err: err}}, rule, false)
+	if o.Err != "a[31mred; b; c" {
+		t.Fatalf("Err = %q", o.Err)
 	}
 }

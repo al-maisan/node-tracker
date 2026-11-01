@@ -3,8 +3,12 @@
 package health
 
 import (
+	"cmp"
 	"errors"
+	"slices"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // MaxErrLen caps error text taken from sources (it can come from untrusted
@@ -26,7 +30,8 @@ const (
 type Rule struct {
 	Threshold uint64 // LAGGING when lag > Threshold
 	Recover   uint64 // back to OK when lag <= Recover (Recover <= Threshold)
-	For       int    // a new state must be seen For samples in a row (>= 1)
+	For       int    // a change must be seen For samples in a row (>= 1)
+	Outlier   uint64 // with 2+ references, ignore one more than this many blocks above the rest; 0 = off
 }
 
 // Reading is the result of querying one source.
@@ -54,7 +59,8 @@ type Observation struct {
 	Node       uint64 // node height (validated blocks)
 	Tip        uint64
 	TipFrom    string // source that set the tip
-	Err        string // why the state is NODE_DOWN / NO_REFERENCE
+	Err        string // why the state is NODE_DOWN / NO_REFERENCE; clipped, no control characters
+	Outliers   string // references ignored as implausibly high, comma-separated
 }
 
 // Observe classifies a sample. lagging tells whether the target's last
@@ -69,14 +75,25 @@ func Observe(s Sample, r Rule, lagging bool) Observation {
 	}
 	o := Observation{NodeSource: s.Node.Source, Node: s.Node.Blocks, Tip: s.Node.Tip(), TipFrom: s.Node.Source}
 	var errs []error
+	var ok []Reading
 	for _, ref := range s.Refs {
 		if ref.Err != nil {
 			errs = append(errs, ref.Err)
-			continue
+		} else {
+			ok = append(ok, ref)
 		}
-		if ref.Tip() > o.Tip {
-			o.Tip, o.TipFrom = ref.Tip(), ref.Source
-		}
+	}
+	// One broken or tampered reference must not pin the target in LAGGING:
+	// a reference far above all other references is ignored. The node's own
+	// headers are not compared, since an isolated node's headers are behind.
+	slices.SortStableFunc(ok, func(a, b Reading) int { return cmp.Compare(b.Tip(), a.Tip()) })
+	var outliers []string
+	for r.Outlier > 0 && len(ok) >= 2 && ok[0].Tip()-ok[1].Tip() > r.Outlier {
+		outliers, ok = append(outliers, ok[0].Source), ok[1:]
+	}
+	o.Outliers = strings.Join(outliers, ",")
+	if len(ok) > 0 && ok[0].Tip() > o.Tip {
+		o.Tip, o.TipFrom = ok[0].Tip(), ok[0].Source
 	}
 	if o.Tip > o.Node {
 		o.Lag = o.Tip - o.Node
@@ -97,12 +114,21 @@ func Observe(s Sample, r Rule, lagging bool) Observation {
 	return o
 }
 
+// clip makes untrusted error text safe to store, log, print and send: line
+// breaks become "; ", other control characters (terminal escapes) are
+// dropped, and the length is capped.
 func clip(s string) string {
-	r := []rune(s)
-	if len(r) <= MaxErrLen {
-		return s
+	s = strings.NewReplacer("\r\n", "; ", "\n", "; ").Replace(s)
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	if r := []rune(s); len(r) > MaxErrLen {
+		return string(r[:MaxErrLen-1]) + "…"
 	}
-	return string(r[:MaxErrLen-1]) + "…"
+	return s
 }
 
 // Target is the persisted, debounced state of one target.
@@ -120,15 +146,17 @@ func (t Target) Lagging() bool { return t.LastLag == Lagging }
 // Step feeds one observed state into the debouncer. It returns the new
 // target state and whether a change must be alerted. The very first state of
 // a target is set silently when it is OK.
+//
+// Any sample that differs from the current state counts toward leaving it,
+// even if those samples differ from each other: LAGGING, NODE_DOWN, LAGGING
+// is just as much "not OK" as LAGGING three times. The target then moves to
+// the latest observed state.
 func Step(t Target, observed State, r Rule, now time.Time) (next Target, alert bool) {
 	if observed == t.Current {
 		return Target{Current: t.Current, Since: t.Since, LastLag: t.LastLag}, false
 	}
-	if observed == t.Candidate {
-		t.Seen++
-	} else {
-		t.Candidate, t.Seen = observed, 1
-	}
+	t.Candidate = observed
+	t.Seen++
 	if t.Seen < max(r.For, 1) {
 		return t, false
 	}

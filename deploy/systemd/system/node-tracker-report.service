@@ -9,20 +9,33 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/node-tracker report -config /etc/node-tracker/config.yaml
+# 4 = a target is not in sync: the report was sent, the unit did its job
 SuccessExitStatus=4
 User=node-tracker
 Group=node-tracker
 #SupplementaryGroups=bitcoin
 
+# Hardening: same as node-tracker.service
 NoNewPrivileges=yes
 CapabilityBoundingSet=
+AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077

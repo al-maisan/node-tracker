@@ -56,17 +56,28 @@ Durations use Go syntax: `90s`, `5m`, `1h30m`.
 | `name` | string | *required* | Unique. 1–64 of `A–Z a–z 0–9 . _ -`. Shown in alerts. |
 | `node` | endpoint | *required* | The node being watched. Kinds: `bitcoind`. |
 | `references` | list of endpoints | none | Independent views of the chain tip. Kinds: `esplora`, `bitcoind`. |
+| `reference_outlier` | integer | `6` | With 2+ responding references, a reference more than this many blocks above all the others is ignored (and logged). `0` turns it off. |
 | `alert.threshold` | integer | *required* | `LAGGING` when lag **>** this many blocks. |
 | `alert.recover_threshold` | integer | `threshold` | Back to `OK` when lag **≤** this. Must be ≤ `threshold`. |
-| `alert.for` | integer | `2` | A new state must be seen this many ticks in a row before it counts (1–100). |
+| `alert.for` | integer | `2` | The target must look different from its current state this many ticks in a row before the state changes (1–100). Different bad states count together: `LAGGING, NODE_DOWN` leaves `OK` just like `LAGGING, LAGGING`, and the target takes the latest state. |
 | `notify` | list of names | *required* | Notifiers that get this target's alerts. |
 
 **References:** without any, lag is measured against the node's own header
 height only. That catches a node that is stuck validating, but not a node
 that has lost contact with the network. A warning is logged in that case.
-Two independent references are a good default. The tip is the *highest*
-height reported, so a reference that is down or behind never hides a
-problem.
+Two independent references are a good default, three are better. The tip
+is the *highest* height reported, so a reference that is down or behind
+never hides a problem.
+
+The *highest* rule has one weakness: a single broken or tampered reference
+(for example plain http with `allow_insecure`) could report a height far
+ahead and keep the target `LAGGING` forever. `reference_outlier` guards
+against that. A reference that is more than that many blocks above *every
+other reference* is ignored. Honest references are within a block or two of
+each other, so this never hides a real lag. The node's own headers are not
+part of this comparison, because an isolated node's headers are behind by
+definition. With a single responding reference there is nothing to compare,
+so it is trusted.
 
 ### Choosing the thresholds
 

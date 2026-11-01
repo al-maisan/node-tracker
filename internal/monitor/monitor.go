@@ -65,6 +65,9 @@ func (m *Monitor) Observe(ctx context.Context, d *state.Data) ([]Result, error) 
 		lagging := d != nil && d.Targets[t.Name].Lagging()
 		o := health.Observe(samples[i], t.Rule, lagging)
 		res[i] = Result{Target: t.Name, Observation: o}
+		if o.Outliers != "" {
+			m.Log.Warn("ignoring implausibly high reference", "target", t.Name, "references", o.Outliers)
+		}
 		m.Log.Debug("sample", "target", t.Name, "observed", o.State, "lag", o.Lag,
 			"node", o.Node, "tip", o.Tip, "tip_from", o.TipFrom)
 	}

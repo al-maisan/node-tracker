@@ -62,9 +62,10 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 			return nil, fmt.Errorf("target %s: %w", t.Name, err)
 		}
 		mt := monitor.Target{
-			Name:   t.Name,
-			Node:   node,
-			Rule:   health.Rule{Threshold: *t.Alert.Threshold, Recover: *t.Alert.RecoverThreshold, For: t.Alert.For},
+			Name: t.Name,
+			Node: node,
+			Rule: health.Rule{Threshold: *t.Alert.Threshold, Recover: *t.Alert.RecoverThreshold,
+				For: t.Alert.For, Outlier: *t.ReferenceOutlier},
 			Notify: t.Notify,
 		}
 		for _, r := range t.References {

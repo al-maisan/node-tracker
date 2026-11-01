@@ -8,7 +8,9 @@ Documentation=https://github.com/al-maisan/node-tracker
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/node-tracker once
-# 3 = another instance holds the lock, 4 = a target is not in sync (already alerted)
+# 3 = another instance holds the lock (this run did nothing).
+# 4 = this run observed a target not in sync. That is the monitored state,
+#     not a failure of this unit; alerts follow the debounced state.
 SuccessExitStatus=3 4
 TimeoutStartSec=5min
 

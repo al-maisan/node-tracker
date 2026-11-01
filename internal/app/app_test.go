@@ -23,15 +23,16 @@ func TestEveryKindIsImplemented(t *testing.T) {
 }
 
 func TestBuild(t *testing.T) {
-	th, rec := uint64(3), uint64(1)
+	th, rec, out := uint64(3), uint64(1), uint64(6)
 	c := &config.Config{
 		Timeout: 1,
 		Targets: []config.Target{{
-			Name:       "btc",
-			Node:       config.Endpoint{Kind: config.KindBitcoind, Name: "bitcoind:x", URL: "http://127.0.0.1:8332", CookieFile: "/c"},
-			References: []config.Endpoint{{Kind: config.KindEsplora, Name: "esplora:y", URL: "https://y/api"}},
-			Alert:      config.Alert{Threshold: &th, RecoverThreshold: &rec, For: 2},
-			Notify:     []string{"tg"},
+			Name:             "btc",
+			Node:             config.Endpoint{Kind: config.KindBitcoind, Name: "bitcoind:x", URL: "http://127.0.0.1:8332", CookieFile: "/c"},
+			References:       []config.Endpoint{{Kind: config.KindEsplora, Name: "esplora:y", URL: "https://y/api"}},
+			Alert:            config.Alert{Threshold: &th, RecoverThreshold: &rec, For: 2},
+			ReferenceOutlier: &out,
+			Notify:           []string{"tg"},
 		}},
 		Notifiers: []config.Notifier{{Name: "tg", Kind: config.KindTelegram, ChatID: "1", BotToken: "t"}},
 	}
@@ -40,7 +41,7 @@ func TestBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	tg := m.Targets[0]
-	if tg.Node.Name() != "bitcoind:x" || tg.Refs[0].Name() != "esplora:y" || tg.Rule.Recover != 1 || m.Notifiers["tg"] == nil {
+	if tg.Node.Name() != "bitcoind:x" || tg.Refs[0].Name() != "esplora:y" || tg.Rule.Recover != 1 || tg.Rule.Outlier != 6 || m.Notifiers["tg"] == nil {
 		t.Fatalf("bad wiring: %+v", m)
 	}
 }

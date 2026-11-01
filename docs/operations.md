@@ -69,8 +69,9 @@ same way, using the `*-once.*` units.
 - cron's smallest step is one minute. For shorter intervals, use a systemd
   timer.
 - If two runs overlap, the later one exits with code 3 and does nothing.
-- Exit code 4 means "a target is not in sync". The alert for it has already
-  been queued, so it is not a cron failure.
+- Exit code 4 means "this run observed a target not in sync". That is
+  the state being monitored, not a failure. Alerts follow the debounced
+  state (`alert.for`), not single runs.
 
 See [deploy/cron/crontab.example](../deploy/cron/crontab.example).
 

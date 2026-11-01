@@ -58,7 +58,7 @@ func TestValidDefaults(t *testing.T) {
 		t.Errorf("durations: %s %s", c.Interval, c.Timeout)
 	}
 	a := c.Targets[0].Alert
-	if *a.RecoverThreshold != 3 || a.For != 2 {
+	if *a.RecoverThreshold != 3 || a.For != 2 || *c.Targets[0].ReferenceOutlier != 6 {
 		t.Errorf("alert defaults: %+v", a)
 	}
 	if c.Notifiers[0].APIURL != DefaultTelegramAPI {
