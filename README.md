@@ -205,6 +205,7 @@ tick:  lock state ─▶ sample node + references in parallel ─▶ classify �
 - [Configuration reference](docs/configuration.md)
 - [Telegram setup](docs/telegram.md)
 - [Operations: deployment, logs, state, Tor, troubleshooting](docs/operations.md)
+- [Node boxes: Umbrel, StartOS, RaspiBlitz, myNode](docs/node-boxes.md)
 - [Design](docs/design.md)
 
 ## Roadmap

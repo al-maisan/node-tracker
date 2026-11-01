@@ -166,6 +166,9 @@ proxy and an `rpcauth` user (the cookie is only readable on the node's host).
 If Tor on the monitoring host stops, the node shows as `NODE_DOWN`: it
 can't be watched then, so that is the right alert.
 
+For Umbrel, StartOS, RaspiBlitz and myNode, see [Node boxes](node-boxes.md):
+it shows where each box keeps the RPC credentials and its onion address.
+
 For the opposite case, a local node reached directly and the references and
 Telegram through Tor, see
 [Proxies and Tor](configuration.md#proxies-and-tor).
