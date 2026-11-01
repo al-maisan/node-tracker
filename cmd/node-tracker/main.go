@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -349,35 +350,57 @@ func newLogger(w io.Writer, format, level string) (*slog.Logger, error) {
 	return nil, fmt.Errorf("invalid -log-format %q", format)
 }
 
-// versionString is e.g. "node-tracker v1.0.0 (a1b2c3d, built 2026-11-01T08:00:00Z, go1.26.10)".
-// The Makefile injects version, commit and build time. Without them, the
-// module version (go install …@vX.Y.Z) and the embedded VCS data are used.
+// versionString is e.g. "node-tracker v1.0.0 (a1b2c3d, built 2026-11-01T08:00:00Z, go1.26.10)"
+// for `make build`, which injects version, commit and build time.
 func versionString() string {
-	v, c, bt := version, commit, buildTime
-	bi, ok := debug.ReadBuildInfo()
-	if ok && v == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		v = bi.Main.Version // go install module@version
-	}
-	if ok && c == "" {
-		var dirty bool
-		for _, s := range bi.Settings {
-			switch s.Key {
-			case "vcs.revision":
-				c = s.Value[:min(7, len(s.Value))]
-			case "vcs.modified":
-				dirty = s.Value == "true"
-			}
-		}
-		if dirty && c != "" {
-			c += "-dirty"
-		}
-	}
-	return fmt.Sprintf("node-tracker %s (%s, built %s, %s)", v, orUnknown(c), orUnknown(bt), runtime.Version())
+	bi, _ := debug.ReadBuildInfo()
+	return formatVersion(version, commit, buildTime, bi, runtime.Version())
 }
 
-func orUnknown(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "unknown"
+// pseudoRev matches the commit hash at the end of a pseudo-version such as
+// v0.0.0-20261101080000-a1b2c3d4e5f6.
+var pseudoRev = regexp.MustCompile(`[-.]\d{14}-([0-9a-f]{12})(?:\+[0-9A-Za-z.-]+)?$`)
+
+// formatVersion fills what the ldflags left empty from the build info (bi may
+// be nil): the module version (go install …@vX.Y.Z), the VCS revision of a
+// checkout, or the hash in a pseudo-version. Unknown parts are left out.
+func formatVersion(v, c, bt string, bi *debug.BuildInfo, goVersion string) string {
+	var goInstall bool
+	if bi != nil {
+		if v == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			v = bi.Main.Version
+		}
+		if c == "" {
+			var dirty bool
+			for _, s := range bi.Settings {
+				switch s.Key {
+				case "vcs.revision":
+					c = s.Value[:min(7, len(s.Value))]
+				case "vcs.modified":
+					dirty = s.Value == "true"
+				}
+			}
+			if dirty && c != "" {
+				c += "-dirty"
+			}
+			// No VCS data: built from the module cache, i.e. go install.
+			if c == "" && v == bi.Main.Version {
+				goInstall = true
+				if m := pseudoRev.FindStringSubmatch(v); m != nil {
+					c = m[1][:7]
+				}
+			}
+		}
 	}
-	return s
+	var parts []string
+	if c = strings.TrimSpace(c); c != "" {
+		parts = append(parts, c)
+	}
+	if bt = strings.TrimSpace(bt); bt != "" {
+		parts = append(parts, "built "+bt)
+	}
+	if goInstall {
+		parts = append(parts, "go install")
+	}
+	return fmt.Sprintf("node-tracker %s (%s)", v, strings.Join(append(parts, goVersion), ", "))
 }

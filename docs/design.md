@@ -338,7 +338,7 @@ because a sensible value depends on the chain and on the user's tolerance.
 | `node-tracker report` | send a status report of every target to every notifier, whatever the state. Not queued: a report is worthless if late |
 | `node-tracker test-notify [name]` | send a test message through one notifier, or all of them. Useful during setup |
 | `node-tracker install-service -user\|-system` | write the shipped unit with `ExecStart=` set to the running binary and enable it; `-system` also creates the user and installs the config and secrets (see operations.md) |
-| `node-tracker version` | version, short git commit, build time (from `make build` ldflags; a plain `go install` falls back to the build info Go embeds), Go version |
+| `node-tracker version` | version, short git commit, build time (from `make build` ldflags), Go version; without ldflags the build info Go embeds fills in what it can, e.g. `node-tracker v1.0.0 (go install, go1.26.10)`, and missing parts are left out |
 
 `check` prints a table like this:
 
