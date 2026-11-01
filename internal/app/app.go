@@ -71,7 +71,7 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 			Name: t.Name,
 			Node: node,
 			Rule: health.Rule{Threshold: *t.Alert.Threshold, Recover: *t.Alert.RecoverThreshold,
-				For: t.Alert.For, Outlier: *t.ReferenceOutlier},
+				For: t.Alert.For, DownFor: t.Alert.DownFor, Outlier: *t.ReferenceOutlier},
 			Notify: t.Notify,
 		}
 		for _, r := range t.References {

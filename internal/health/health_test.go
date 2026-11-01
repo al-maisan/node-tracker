@@ -150,10 +150,11 @@ func TestStep(t *testing.T) {
 		current  State
 	}
 	tests := []struct {
-		name  string
-		start Target
-		For   int
-		steps []step
+		name    string
+		start   Target
+		For     int
+		DownFor int
+		steps   []step
 	}{
 		{
 			name: "first OK is silent",
@@ -247,6 +248,53 @@ func TestStep(t *testing.T) {
 			},
 		},
 		{
+			name:    "down_for: a short outage is not NODE_DOWN",
+			start:   Target{Current: OK},
+			For:     2,
+			DownFor: 4,
+			steps: []step{
+				{NodeDown, false, OK},
+				{NodeDown, false, OK},
+				{NodeDown, false, OK},
+				{OK, false, OK},
+				{NodeDown, false, OK},
+				{NodeDown, false, OK},
+				{NodeDown, false, OK},
+				{NodeDown, true, NodeDown},
+			},
+		},
+		{
+			name:    "down_for: a node that answers behind is LAGGING after For",
+			start:   Target{Current: OK},
+			For:     2,
+			DownFor: 4,
+			steps: []step{
+				{NodeDown, false, OK},
+				{Lagging, true, Lagging},
+			},
+		},
+		{
+			name:    "down_for: LAGGING, then unreachable, waits down_for",
+			start:   Target{Current: Lagging},
+			For:     2,
+			DownFor: 3,
+			steps: []step{
+				{NodeDown, false, Lagging},
+				{NodeDown, false, Lagging},
+				{NodeDown, true, NodeDown},
+			},
+		},
+		{
+			name:    "down_for: recovery takes For",
+			start:   Target{Current: NodeDown},
+			For:     2,
+			DownFor: 10,
+			steps: []step{
+				{OK, false, NodeDown},
+				{OK, true, OK},
+			},
+		},
+		{
 			name:  "For 0 behaves like 1",
 			start: Target{Current: OK},
 			steps: []step{{NodeDown, true, NodeDown}},
@@ -257,7 +305,7 @@ func TestStep(t *testing.T) {
 			cur := tt.start
 			for i, s := range tt.steps {
 				now := t0.Add(time.Duration(i) * time.Minute)
-				next, alert := Step(cur, s.observed, Rule{For: tt.For}, now)
+				next, alert := Step(cur, s.observed, Rule{For: tt.For, DownFor: tt.DownFor}, now)
 				if alert != s.alert || next.Current != s.current {
 					t.Fatalf("step %d (%s): got alert=%v current=%q, want alert=%v current=%q",
 						i, s.observed, alert, next.Current, s.alert, s.current)
@@ -276,6 +324,19 @@ func TestErrorsAreClipped(t *testing.T) {
 	o := Observe(Sample{Node: Reading{Err: long}}, rule, false)
 	if n := len([]rune(o.Err)); n != MaxErrLen || !strings.HasSuffix(o.Err, "…") {
 		t.Fatalf("len = %d", n)
+	}
+}
+
+// down_for keeps the last lag verdict, as NODE_DOWN always does.
+func TestDownForKeepsHysteresis(t *testing.T) {
+	r := Rule{Threshold: 6, Recover: 1, For: 1, DownFor: 2}
+	now := time.Now()
+	tgt, _ := Step(Target{Current: OK, LastLag: OK}, Lagging, r, now)
+	for range 2 {
+		tgt, _ = Step(tgt, NodeDown, r, now)
+	}
+	if tgt.Current != NodeDown || !tgt.Lagging() {
+		t.Fatalf("got %+v, want NODE_DOWN with the lagging verdict kept", tgt)
 	}
 }
 

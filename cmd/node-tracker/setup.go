@@ -52,7 +52,8 @@ var presets = []struct {
 }
 
 const (
-	defaultPreset = 1 // balanced
+	onionDownWait = 5 * time.Minute // how long a .onion node must be unreachable for NODE_DOWN
+	defaultPreset = 1               // balanced
 	notifierName  = "telegram"
 	maxSecret     = 4 << 10
 )
@@ -1158,6 +1159,9 @@ func (w *wizard) render(a *answers, tok, pw string) ([]byte, error) {
 	p := presets[a.preset]
 	t := config.Target{Name: a.name, Node: a.node, References: a.refs,
 		Alert: config.Alert{Threshold: &p.threshold, RecoverThreshold: &p.recover, For: p.ticks}}
+	if explain.IsOnion(a.node.URL) { // Tor stalls for minutes at times
+		t.Alert.DownFor = max(p.ticks, int(onionDownWait/p.interval))
+	}
 	if a.node.Username != "" {
 		t.Node.PasswordFile = pw
 	}

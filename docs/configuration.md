@@ -158,6 +158,7 @@ Durations use Go syntax: `90s`, `5m`, `1h30m`.
 | `alert.threshold` | integer | `3` | `LAGGING` when lag **>** this many blocks. |
 | `alert.recover_threshold` | integer | `threshold`; `1` if `threshold` is left out too | Back to `OK` when lag **≤** this. Must be ≤ `threshold`. |
 | `alert.for` | integer | `2` | Ticks in a row a change must be seen before the state changes (1–100). Bad states count together: `LAGGING, NODE_DOWN` leaves `OK` just like `LAGGING, LAGGING`, and the target takes the latest state. Returning to `OK` needs this many `OK` ticks in a row. |
+| `alert.down_for` | integer | `for` | Ticks in a row for a change to `NODE_DOWN` (1–100), when the latest tick is `NODE_DOWN`. A node reached over Tor is unreachable for a few minutes at times; `down_for: 10` with a 30s `interval` alerts only after 5 minutes. `LAGGING` and recovery still take `for`. `node-tracker setup` writes it for `.onion` nodes. |
 | `notify` | list of names | every notifier | Notifiers that get this target's alerts. |
 
 **References:** without any (`references: []`, or on regtest), lag is measured against the node's own header
@@ -203,7 +204,8 @@ values:
 | quiet | 6 | 2 | 3 | 60s |
 
 The time until an alert is about `for × interval`, plus the time the node
-needs to fall `threshold` blocks behind.
+needs to fall `threshold` blocks behind. For "node unreachable" it is
+`down_for × interval`.
 
 ## Endpoints
 

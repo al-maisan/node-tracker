@@ -289,18 +289,20 @@ func TestDefaultsPartial(t *testing.T) {
 	env := fakeEnv(t, "linux", nil, map[string]string{"~/.bitcoin/.cookie": "__cookie__:x"})
 	two := minimal + "  - {name: second, kind: telegram, bot_token_file: TOKENFILE, chat_id: \"43\"}\n"
 	for _, tt := range []struct {
-		name, alert   string
-		threshold     uint64
-		recover, ffor int
-		notify        string
-		wantErr       string
+		name, alert            string
+		threshold              uint64
+		recover, ffor, downFor int
+		notify                 string
+		wantErr                string
 	}{
-		{"threshold only", "    alert: {threshold: 6}\n", 6, 6, 2, "[ops second]", ""},
-		{"for only", "    alert: {for: 3}\n", 3, 1, 3, "[ops second]", ""},
-		{"recover only", "    alert: {recover_threshold: 2}\n", 3, 2, 2, "[ops second]", ""},
-		{"recover above default", "    alert: {recover_threshold: 4}\n", 0, 0, 0, "", "recover_threshold: must not exceed threshold (3)"},
-		{"explicit notify", "    notify: [second]\n", 3, 1, 2, "[second]", ""},
-		{"empty notify", "    notify: []\n", 0, 0, 0, "", "notify: at least one notifier is required"},
+		{"threshold only", "    alert: {threshold: 6}\n", 6, 6, 2, 2, "[ops second]", ""},
+		{"for only", "    alert: {for: 3}\n", 3, 1, 3, 3, "[ops second]", ""},
+		{"down_for only", "    alert: {down_for: 10}\n", 3, 1, 2, 10, "[ops second]", ""},
+		{"down_for too large", "    alert: {down_for: 101}\n", 0, 0, 0, 0, "", "down_for: must be between 1 and 100"},
+		{"recover only", "    alert: {recover_threshold: 2}\n", 3, 2, 2, 2, "[ops second]", ""},
+		{"recover above default", "    alert: {recover_threshold: 4}\n", 0, 0, 0, 0, "", "recover_threshold: must not exceed threshold (3)"},
+		{"explicit notify", "    notify: [second]\n", 3, 1, 2, 2, "[second]", ""},
+		{"empty notify", "    notify: []\n", 0, 0, 0, 0, "", "notify: at least one notifier is required"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _, err := LoadEnv(write(t, strings.Replace(two, "  - name: orendil\n", "  - name: orendil\n"+tt.alert, 1)), env)
@@ -314,8 +316,8 @@ func TestDefaultsPartial(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := c.Targets[0].Alert
-			if *a.Threshold != tt.threshold || *a.RecoverThreshold != uint64(tt.recover) || a.For != tt.ffor || fmt.Sprint(c.Targets[0].Notify) != tt.notify {
-				t.Fatalf("alert = %d/%d/%d notify = %v", *a.Threshold, *a.RecoverThreshold, a.For, c.Targets[0].Notify)
+			if *a.Threshold != tt.threshold || *a.RecoverThreshold != uint64(tt.recover) || a.For != tt.ffor || a.DownFor != tt.downFor || fmt.Sprint(c.Targets[0].Notify) != tt.notify {
+				t.Fatalf("alert = %d/%d/%d/%d notify = %v", *a.Threshold, *a.RecoverThreshold, a.For, a.DownFor, c.Targets[0].Notify)
 			}
 		})
 	}
