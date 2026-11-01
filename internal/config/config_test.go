@@ -95,9 +95,9 @@ func TestInvalid(t *testing.T) {
 		{"bad chat id", `"-1001234567890"`, `"x y"`, "chat_id"},
 		{"token file and env", "bot_token_file: TOKENFILE", "bot_token_file: TOKENFILE\n    bot_token_env: X", "not both"},
 		{"missing token env", "bot_token_file: TOKENFILE", "bot_token_env: NODE_TRACKER_TEST_UNSET", "not set"},
-		{"plain http api_url", "chat_id: \"-1001234567890\"", "chat_id: \"-1001234567890\"\n    api_url: http://example.com", "api_url: plain http"},
-		{"relative cookie path", "cookie_file: /var/lib/bitcoind/.cookie", "cookie_file: bitcoind/.cookie", "cookie_file: must be an absolute path"},
-		{"relative state file", "targets:", "state_file: state.json\ntargets:", "state_file: must be an absolute path"},
+		{"plain http api_url", "chat_id: \"-1001234567890\"", "chat_id: \"-1001234567890\"\n    api_url: http://example.com", `api_url "http://example.com": plain http`},
+		{"relative cookie path", "cookie_file: /var/lib/bitcoind/.cookie", "cookie_file: bitcoind/.cookie", `cookie_file "bitcoind/.cookie": must be an absolute path`},
+		{"relative state file", "targets:", "state_file: state.json\ntargets:", `state_file "state.json": must be an absolute path`},
 		{"duplicate reference", "https://mempool.space/api\n", "https://mempool.space/api\n      - kind: esplora\n        url: https://mempool.space/api\n", "duplicate"},
 	}
 	for _, tt := range tests {
@@ -112,6 +112,81 @@ func TestInvalid(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "SECRET") {
 				t.Fatalf("error leaks secret: %v", err)
+			}
+		})
+	}
+}
+
+// Errors show the rejected value and a hint for common mistakes.
+func TestErrorShowsValue(t *testing.T) {
+	tests := []struct{ name, from, to, want string }{
+		{"env var in url", "http://127.0.0.1:8332", "http://$ONION:8332",
+			`targets[0].node.url "http://$ONION:8332": invalid character "$" in host name; YAML does not expand environment variables`},
+		{"braced env var in url", "http://127.0.0.1:8332", "http://${ONION}:8332",
+			`targets[0].node.url "http://${ONION}:8332": invalid character "{" in host name; YAML does not expand environment variables`},
+		{"placeholder in url", "http://127.0.0.1:8332", "http://<your-node>:8332",
+			`targets[0].node.url "http://<your-node>:8332": invalid character "<" in host name; this looks like a placeholder`},
+		{"missing scheme", "http://127.0.0.1:8332", "127.0.0.1:8332",
+			`targets[0].node.url "127.0.0.1:8332": missing scheme; add http:// or https://`},
+		{"missing scheme with host", "https://mempool.space/api", "mempool.space/api",
+			`targets[0].references[0].url "mempool.space/api": missing scheme; add http:// or https://`},
+		{"empty url", "url: http://127.0.0.1:8332", "url: ''", `targets[0].node.url: required`},
+		{"other scheme", "https://mempool.space/api", "ftp://mempool.space/api",
+			`targets[0].references[0].url "ftp://mempool.space/api": must be an absolute http(s) URL`},
+		{"bad port", "http://127.0.0.1:8332", "http://127.0.0.1:rpc",
+			`targets[0].node.url "http://127.0.0.1:rpc": invalid port ":rpc" after host`},
+		{"plain http", "http://127.0.0.1:8332", "http://10.0.0.5:8332",
+			`targets[0].node.url "http://10.0.0.5:8332": plain http is only allowed for loopback hosts`},
+		{"kind", "kind: bitcoind", "kind: geth", `targets[0].node.kind "geth": must be one of [bitcoind]`},
+		{"chat id placeholder", `"-1001234567890"`, `"<chat id>"`,
+			`notifiers[0].chat_id "<chat id>": must be a numeric chat id or @channelname; this looks like a placeholder`},
+		{"env var in path", "cookie_file: /var/lib/bitcoind/.cookie", "cookie_file: $HOME/.bitcoin/.cookie",
+			`targets[0].node.cookie_file "$HOME/.bitcoin/.cookie": must be an absolute path or start with ~/; YAML does not expand environment variables`},
+		{"target name", "name: orendil", "name: 'a b'", `targets[0].name "a b": must match`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := strings.Replace(valid, tt.from, tt.to, 1)
+			if cfg == valid {
+				t.Fatalf("replacement %q did not apply", tt.from)
+			}
+			_, _, err := Load(write(t, cfg))
+			if err == nil || !strings.Contains(err.Error(), "\n"+tt.want) {
+				t.Fatalf("err = %v\nwant line %s", err, tt.want)
+			}
+		})
+	}
+}
+
+// Notifiers have no allow_insecure, so the error must not suggest it.
+func TestNotifierPlainHTTP(t *testing.T) {
+	cfg := strings.Replace(valid, `chat_id: "-1001234567890"`, `chat_id: "-1001234567890"`+"\n    api_url: http://example.com", 1)
+	_, _, err := Load(write(t, cfg))
+	if want := "\n" + `notifiers[0].api_url "http://example.com": plain http is only allowed for loopback hosts; use https`; err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("err = %v, want it to end with %s", err, want)
+	}
+}
+
+// A URL password never shows up in an error, whether or not the URL parses.
+func TestURLPasswordNeverShown(t *testing.T) {
+	const pw = "s3cr3tPW"
+	for _, tt := range []struct{ url, want string }{
+		{"http://u:" + pw + "@127.0.0.1:8332", `"http://REDACTED@127.0.0.1:8332": must not contain credentials`},
+		{"https://u:" + pw + "@mempool.space/api", `"https://REDACTED@mempool.space/api": must not contain credentials`},
+		{"http://u:" + pw + "%zz@127.0.0.1:8332", `"http://REDACTED@127.0.0.1:8332": invalid URL; credentials`},
+		{"http://u:" + pw + "/x@127.0.0.1:8332", `"http://REDACTED@127.0.0.1:8332": invalid URL; credentials`},
+		{"http://u:p@" + pw + "@127.0.0.1:8332", `"http://REDACTED@127.0.0.1:8332": must not contain credentials`},
+		{"http://u:" + pw + "@$HOST:8332", `"http://REDACTED@$HOST:8332": must not contain credentials`},
+		{"u:" + pw + "@127.0.0.1:8332", `"REDACTED@127.0.0.1:8332": missing scheme`},
+		{"http://u:" + pw + "@ftp://x@h", `"http://REDACTED@h": must not contain credentials`},
+	} {
+		t.Run(tt.want, func(t *testing.T) { // not tt.url: the name is part of the temp dir in the error
+			_, _, err := Load(write(t, strings.Replace(valid, "http://127.0.0.1:8332", tt.url, 1)))
+			if err == nil || !strings.Contains(err.Error(), "targets[0].node.url "+tt.want) {
+				t.Fatalf("err = %v, want %s", err, tt.want)
+			}
+			if strings.Contains(err.Error(), pw) {
+				t.Fatalf("error leaks the password: %v", err)
 			}
 		})
 	}

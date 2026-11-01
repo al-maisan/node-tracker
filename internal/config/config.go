@@ -48,6 +48,7 @@ const (
 var (
 	nameRE   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	chatIDRE = regexp.MustCompile(`^(-?[0-9]{1,20}|@[A-Za-z0-9_]{5,32})$`)
+	schemeRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://`)
 )
 
 // Secret is a resolved secret. It formats as "REDACTED" so it can't leak
@@ -151,10 +152,23 @@ func (v *validator) errf(path, format string, a ...any) {
 	v.errs = append(v.errs, fmt.Errorf("%s: %s", path, fmt.Sprintf(format, a...)))
 }
 
+// bad is errf for a field whose value is shown, with a hint for common
+// mistakes. value must not be a secret; URLs go through redactURL first.
+func (v *validator) bad(path, value, format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	switch {
+	case strings.Contains(value, "$"):
+		msg += "; YAML does not expand environment variables"
+	case strings.Contains(value, "<") && strings.Contains(value, ">"):
+		msg += "; this looks like a placeholder"
+	}
+	v.errf(fmt.Sprintf("%s %q", path, value), "%s", msg)
+}
+
 func (c *Config) validate(v *validator) {
 	c.StateFile = expandHome(c.StateFile)
 	if c.StateFile != "" && !filepath.IsAbs(c.StateFile) {
-		v.errf("state_file", "must be an absolute path or start with ~/")
+		v.bad("state_file", c.StateFile, "must be an absolute path or start with ~/")
 	}
 	if c.Interval == 0 {
 		c.Interval = defaultInterval
@@ -174,7 +188,7 @@ func (c *Config) validate(v *validator) {
 		n := &c.Notifiers[i]
 		p := fmt.Sprintf("notifiers[%d]", i)
 		if !nameRE.MatchString(n.Name) {
-			v.errf(p+".name", "must match %s", nameRE)
+			v.bad(p+".name", n.Name, "must match %s", nameRE)
 		} else if notifiers[n.Name] {
 			v.errf(p+".name", "duplicate %q", n.Name)
 		}
@@ -190,7 +204,7 @@ func (c *Config) validate(v *validator) {
 		t := &c.Targets[i]
 		p := fmt.Sprintf("targets[%d]", i)
 		if !nameRE.MatchString(t.Name) {
-			v.errf(p+".name", "must match %s", nameRE)
+			v.bad(p+".name", t.Name, "must match %s", nameRE)
 		} else if targets[t.Name] {
 			v.errf(p+".name", "duplicate %q", t.Name)
 		}
@@ -229,10 +243,10 @@ func (c *Config) validate(v *validator) {
 
 func (e *Endpoint) validate(v *validator, p string, kinds []string) {
 	if !slices.Contains(kinds, e.Kind) {
-		v.errf(p+".kind", "must be one of %v", kinds)
+		v.bad(p+".kind", e.Kind, "must be one of %v", kinds)
 		return
 	}
-	u := checkURL(v, p+".url", e.URL, e.AllowInsecure)
+	u := checkURL(v, p+".url", e.URL, e.AllowInsecure, true)
 	if u == nil {
 		return
 	}
@@ -242,7 +256,7 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string) {
 	case KindBitcoind:
 		e.CookieFile = expandHome(e.CookieFile)
 		if e.CookieFile != "" && !filepath.IsAbs(e.CookieFile) {
-			v.errf(p+".cookie_file", "must be an absolute path or start with ~/")
+			v.bad(p+".cookie_file", e.CookieFile, "must be an absolute path or start with ~/")
 		}
 		hasUser := e.Username != ""
 		switch {
@@ -280,18 +294,18 @@ func (a *Alert) validate(v *validator, p string) {
 
 func (n *Notifier) validate(v *validator, p string) {
 	if !slices.Contains(NotifierKinds, n.Kind) {
-		v.errf(p+".kind", "must be one of %v", NotifierKinds)
+		v.bad(p+".kind", n.Kind, "must be one of %v", NotifierKinds)
 		return
 	}
 	switch n.Kind {
 	case KindTelegram:
 		if !chatIDRE.MatchString(n.ChatID) {
-			v.errf(p+".chat_id", "must be a numeric chat id or @channelname")
+			v.bad(p+".chat_id", n.ChatID, "must be a numeric chat id or @channelname")
 		}
 		if n.APIURL == "" {
 			n.APIURL = DefaultTelegramAPI
 		} else {
-			checkURL(v, p+".api_url", n.APIURL, false)
+			checkURL(v, p+".api_url", n.APIURL, false, false)
 		}
 		n.BotToken = resolveSecret(v, p+".bot_token", n.BotTokenFile, n.BotTokenEnv)
 		if n.BotToken != "" && strings.ContainsAny(string(n.BotToken), " \t\r\n/?#") {
@@ -309,7 +323,7 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 		return ""
 	case file != "":
 		if file = expandHome(file); !filepath.IsAbs(file) {
-			v.errf(p+"_file", "must be an absolute path or start with ~/")
+			v.bad(p+"_file", file, "must be an absolute path or start with ~/")
 			return ""
 		}
 		fi, err := os.Stat(file)
@@ -346,22 +360,76 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 	}
 }
 
-// checkURL validates an endpoint URL: absolute http(s), no credentials, and
-// plain http only for loopback hosts unless allowInsecure.
-func checkURL(v *validator, p, raw string, allowInsecure bool) *url.URL {
-	u, err := url.Parse(raw)
-	switch {
-	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
-		v.errf(p, "must be an absolute http(s) URL")
-		return nil
-	case u.User != nil:
-		v.errf(p, "must not contain credentials; use the auth fields")
-		return nil
-	case u.Scheme == "http" && !allowInsecure && !isLoopback(u.Hostname()):
-		v.errf(p, "plain http is only allowed for loopback hosts; use https or set allow_insecure: true (e.g. LAN or Tor)")
+// checkURL validates an endpoint URL: absolute http(s), a valid host, no
+// credentials, and plain http only for loopback hosts unless allowInsecure.
+// endpoint is set for nodes and references, which have allow_insecure.
+// Errors show the URL with userinfo redacted, and never url.Parse's error
+// for raw, which quotes the input.
+func checkURL(v *validator, p, raw string, allowInsecure, endpoint bool) *url.URL {
+	if raw == "" {
+		v.errf(p, "required")
 		return nil
 	}
-	return u
+	shown := redactURL(raw)
+	if !schemeRE.MatchString(raw) {
+		v.bad(p, shown, "missing scheme; add http:// or https://")
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		v.bad(p, shown, "%s", parseError(shown))
+		return nil
+	}
+	switch {
+	case u.Scheme != "http" && u.Scheme != "https" || u.Host == "":
+		v.bad(p, shown, "must be an absolute http(s) URL")
+	case u.User != nil:
+		v.bad(p, shown, "must not contain credentials; use the auth fields")
+	case badHost(u.Hostname()) != "":
+		v.bad(p, shown, "%s", badHost(u.Hostname()))
+	case u.Scheme == "http" && !allowInsecure && !isLoopback(u.Hostname()) && endpoint:
+		v.bad(p, shown, "plain http is only allowed for loopback hosts; use https or set allow_insecure: true (e.g. LAN or Tor)")
+	case u.Scheme == "http" && !isLoopback(u.Hostname()):
+		v.bad(p, shown, "plain http is only allowed for loopback hosts; use https")
+	default:
+		return u
+	}
+	return nil
+}
+
+// redactURL replaces userinfo with REDACTED. It works on unparsable input
+// too: everything after "scheme://" (or from the start) up to the last "@"
+// goes, as a password may contain any character, including "/" and "@".
+func redactURL(raw string) string {
+	at := strings.LastIndex(raw, "@")
+	if at < 0 {
+		return raw
+	}
+	start := len(schemeRE.FindString(raw[:at]))
+	return raw[:start] + "REDACTED" + raw[at:]
+}
+
+// parseError says why the redacted URL shown does not parse. If it parses,
+// the problem is in the redacted part.
+func parseError(shown string) string {
+	var ue *url.Error
+	if _, err := url.Parse(shown); errors.As(err, &ue) {
+		return ue.Err.Error()
+	}
+	return "invalid URL; credentials (user:pass@) are not allowed, use the auth fields"
+}
+
+// badHost says why host is neither an IP address nor a DNS name, or "".
+func badHost(host string) string {
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	for _, c := range host {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '_') {
+			return fmt.Sprintf("invalid character %q in host name", string(c))
+		}
+	}
+	return ""
 }
 
 // expandHome replaces a leading "~/" with the user's home directory.
