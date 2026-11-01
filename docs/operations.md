@@ -103,8 +103,9 @@ default to Tor); the unit needs nothing. See
 
 ### From a package
 
-The deb or rpm package has installed the binary, the units and the
-`node-tracker` user, so only the config and the token are left.
+The package (PPA, COPR or the release `.deb`) has installed the binary,
+the units and the `node-tracker` user, so only the config and the token
+are left.
 `sudo node-tracker setup` writes them and enables the packaged unit; by
 hand:
 
