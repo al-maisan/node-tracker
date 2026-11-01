@@ -89,12 +89,16 @@ The easiest way first:
   and `man node-tracker` works.
 
   To run it in the background (launchd on macOS, a systemd user service on
-  Linux), put the config in `~/.config/node-tracker/config.yaml`, check it,
-  then start the service:
+  Linux), put the config in `~/.config/node-tracker/config.yaml` (or run
+  `node-tracker setup`), check it, then start the service:
 
   ```sh
-  node-tracker check && brew services start node-tracker
+  node-tracker check
+  brew services start node-tracker
   ```
+
+  Start it once `check` ends with `config ok`. A node that is behind (exit
+  code 4) is no reason to wait: that is what the service alerts about.
 
   It logs to `$(brew --prefix)/var/log/node-tracker.log`. On Linux, also
   run `loginctl enable-linger` to keep it running after you log out.
@@ -118,18 +122,49 @@ The easiest way first:
   Raspberry Pi, armv7 up to v1.0.0; macOS amd64, arm64): download the
   archive for your system from the
   [releases page](https://github.com/al-maisan/node-tracker/releases),
-  together with `SHA256SUMS` and `SHA256SUMS.asc`. Verify and unpack it
-  (example for `v1.0.0` on Linux amd64):
+  together with `SHA256SUMS` and `SHA256SUMS.asc`, into one directory.
+  Verify and unpack it there (example for `v1.0.0` on Linux amd64):
+
+  1. Import the release key:
+
+     ```sh
+     curl -s https://github.com/al-maisan.gpg | gpg --import
+     ```
+
+     You should see `key 1E0A288397AE739E: public key "Muharem Hrnjadovic
+     …" imported` (or `not changed`). Lines such as `420 signatures not
+     checked due to missing keys` and `no ultimately trusted keys found`
+     are normal.
+
+  2. Check the signature of the checksums:
+
+     ```sh
+     gpg --verify SHA256SUMS.asc SHA256SUMS
+     ```
+
+     You should see `Good signature from "Muharem Hrnjadovic …"` and
+     `using RSA key 753B6ECF2B458FF3D19D568C1E0A288397AE739E`. The warning
+     that the key is not certified is expected; any other key, or `BAD
+     signature`, means stop.
+
+  3. Check the archive and unpack it:
+
+     ```sh
+     sha256sum --ignore-missing -c SHA256SUMS && tar -xzf node-tracker_1.0.0_linux_amd64.tar.gz
+     ```
+
+     You should see `node-tracker_1.0.0_linux_amd64.tar.gz: OK`. On macOS
+     use `shasum -a 256 --ignore-missing -c SHA256SUMS`.
+
+  The archive holds the binary, its man page (`node-tracker.1`), this
+  README, the docs, the systemd units and an example config.
+
+  For a script, this checks the same and fails unless the release key
+  signed:
 
   ```sh
-  curl -s https://github.com/al-maisan.gpg | gpg --import && gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | grep -q '^\[GNUPG:\] VALIDSIG .* 753B6ECF2B458FF3D19D568C1E0A288397AE739E$' && sha256sum --ignore-missing -c SHA256SUMS && tar -xzf node-tracker_1.0.0_linux_amd64.tar.gz
+  gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | grep -q '^\[GNUPG:\] VALIDSIG .* 753B6ECF2B458FF3D19D568C1E0A288397AE739E$' && sha256sum --ignore-missing -c SHA256SUMS
   ```
-
-  The `grep` only passes for a good signature from the release key
-  `753B 6ECF 2B45 8FF3 D19D 568C 1E0A 2883 97AE 739E`. On macOS use
-  `shasum -a 256 --ignore-missing -c SHA256SUMS`. The archive holds the
-  binary, its man page (`node-tracker.1`), this README, the docs, the
-  systemd units and an example config.
 
   Put the binary on your `PATH`. `/usr/local/bin` also suits the system
   service, which needs a root-owned path:
