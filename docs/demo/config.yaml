@@ -1,0 +1,20 @@
+targets:
+  - name: orendil
+    node:
+      kind: bitcoind
+      url: http://127.0.0.1:8332
+      cookie_file: ~/.bitcoin/.cookie
+    references:
+      - kind: esplora
+        url: http://localhost:3000/api
+    alert:
+      threshold: 3
+      for: 2
+    notify: [telegram]
+
+notifiers:
+  - name: telegram
+    kind: telegram
+    api_url: http://localhost:8081
+    bot_token_file: ~/.config/node-tracker/telegram-token
+    chat_id: "123456789"
