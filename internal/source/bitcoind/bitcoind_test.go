@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -109,5 +110,27 @@ func TestCookieAuth(t *testing.T) {
 	}
 	if h, err := c.Height(context.Background()); err != nil || h.Blocks != 7 {
 		t.Fatalf("got %+v, %v", h, err)
+	}
+}
+
+// A cookie_file the config hides (it may be a pasted secret) stays out of
+// errors; the error still tells what went wrong.
+func TestHiddenCookiePath(t *testing.T) {
+	srv := fakeNode(t, 200, `{"result":{"blocks":7,"headers":7}}`)
+	const secret = "/Zm9vYmFyYmF6cXV4+abcdefghijklmnop"
+	_, err := New("n", srv.URL, Auth{CookieFile: secret, HideCookie: true}, httpx.NewClient()).Height(context.Background())
+	if err == nil || strings.Contains(err.Error(), "Zm9v") || !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), "path not shown") {
+		t.Fatalf("err = %v", err)
+	}
+	cookie := filepath.Join(t.TempDir(), "c")
+	os.WriteFile(cookie, []byte("no-colon"), 0o600)
+	_, err = New("n", srv.URL, Auth{CookieFile: cookie, HideCookie: true}, httpx.NewClient()).Height(context.Background())
+	if err == nil || strings.Contains(err.Error(), cookie) || !strings.Contains(err.Error(), "malformed") {
+		t.Fatalf("malformed: err = %v", err)
+	}
+	// Shown paths keep the path, which helps to fix it.
+	_, err = New("n", srv.URL, Auth{CookieFile: cookie + ".x"}, httpx.NewClient()).Height(context.Background())
+	if err == nil || !strings.Contains(err.Error(), cookie+".x") || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("shown: err = %v", err)
 	}
 }

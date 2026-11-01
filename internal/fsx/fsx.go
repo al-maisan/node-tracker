@@ -44,7 +44,19 @@ func WriteFile(path string, data []byte, mode fs.FileMode, uid, gid int, bak boo
 			return err
 		}
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// The rename is durable only once the directory is synced.
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // ReadRegular reads path, which must be a regular file, not a symlink.

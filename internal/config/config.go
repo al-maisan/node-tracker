@@ -113,6 +113,7 @@ type Endpoint struct {
 	Timeout      time.Duration `yaml:"-"` // derived: per-call timeout of .onion hosts; 0 means Config.Timeout
 	DefaultProxy bool          `yaml:"-"` // derived: Proxy was set to DefaultTorProxy
 	NodeHost     bool          `yaml:"-"` // derived, references: an Esplora server on the node's host, likely fed by the node
+	HideCookie   bool          `yaml:"-"` // derived: CookieFile may be a pasted secret, so keep it out of messages (see shownPath)
 }
 
 // Alert holds the thresholds. Pointers tell "unset" from 0.
@@ -354,6 +355,7 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 	switch e.Kind {
 	case KindBitcoind:
 		e.CookieFile = expandHome(e.CookieFile)
+		e.HideCookie = e.CookieFile != "" && !shownPath(e.CookieFile)
 		if e.CookieFile != "" && !filepath.IsAbs(e.CookieFile) {
 			v.badPath(p+".cookie_file", e.CookieFile, "cookie")
 		} else if _, err := os.Stat(e.CookieFile); e.CookieFile != "" && errors.Is(err, fs.ErrNotExist) {

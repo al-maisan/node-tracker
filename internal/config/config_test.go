@@ -693,3 +693,17 @@ func TestMarshalRoundTrip(t *testing.T) {
 		t.Fatalf("load: %+v, %v", c, err)
 	}
 }
+
+// HideCookie tells the bitcoind source to keep a secret-like cookie_file
+// out of its runtime errors, as Load keeps it out of its warning.
+func TestHideCookie(t *testing.T) {
+	for _, tt := range []struct {
+		cookie string
+		want   bool
+	}{{"COOKIEFILE", false}, {"/kQ9zX+bLmT2wPq8RtYs=", true}} {
+		c, _, err := Load(write(t, strings.Replace(valid, "cookie_file: COOKIEFILE", "cookie_file: "+tt.cookie, 1)))
+		if err != nil || c.Targets[0].Node.HideCookie != tt.want {
+			t.Fatalf("%s: err = %v, HideCookie = %v", tt.cookie, err, c != nil && c.Targets[0].Node.HideCookie)
+		}
+	}
+}

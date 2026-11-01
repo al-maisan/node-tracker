@@ -331,7 +331,10 @@ At: 2026-11-01 13:05:00 UTC
 Run it hourly or daily from a timer (`node-tracker-report.timer`) or from
 cron. A regular report also proves that the alert path works. A report does
 not touch the state and is not queued: if it can't be delivered, the command
-exits with code 1.
+exits with code 1. It shows each target as one sample sees it, against
+`threshold`, without the debouncing (`for`) or `recover_threshold` of the
+alerts: a target that just caught up can show ✓ while its alert state is
+still `LAGGING`.
 
 ## Logs
 
