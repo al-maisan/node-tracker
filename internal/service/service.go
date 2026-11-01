@@ -232,7 +232,7 @@ func (in *installer) system(ctx context.Context, exe string) error {
 	cfg, err := in.loadConfig(load)
 	if err != nil {
 		if src == "" && errors.Is(err, fs.ErrNotExist) {
-			return usagef("%v; pass the config to install with -config", err)
+			return usagef("no config at %s; pass the config to install with -config", dst)
 		}
 		return err
 	}

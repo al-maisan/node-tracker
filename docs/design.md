@@ -277,9 +277,9 @@ API, so it can change freely.
 ## 5. Configuration
 
 One YAML file; the path comes from `-config` or the XDG default (§4).
-Unknown keys are rejected so typos fail loudly, and every error is reported
-in one go. The full reference is in [configuration.md](configuration.md),
-and an annotated example in
+Unknown keys are rejected so typos fail loudly, with the closest known key
+as a hint, and every error is reported in one go. The full reference is in
+[configuration.md](configuration.md), and an annotated example in
 [examples/config.yaml](../examples/config.yaml).
 
 Required values have no hidden defaults: `alert.threshold` must be set,

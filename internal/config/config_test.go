@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,16 +28,19 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// write puts the config and a token file in a temp dir.
+// write puts the config, a token file and a cookie file in a temp dir.
 func write(t *testing.T, cfg string) string {
 	t.Helper()
 	dir := t.TempDir()
-	tok := filepath.Join(dir, "token")
+	tok, cookie := filepath.Join(dir, "token"), filepath.Join(dir, ".cookie")
 	if err := os.WriteFile(tok, []byte(secret+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(cookie, []byte("__cookie__:x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte(strings.ReplaceAll(cfg, "TOKENFILE", tok)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.NewReplacer("TOKENFILE", tok, "COOKIEFILE", cookie).Replace(cfg)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -47,7 +52,7 @@ targets:
     node:
       kind: bitcoind
       url: http://127.0.0.1:8332
-      cookie_file: /var/lib/bitcoind/.cookie
+      cookie_file: COOKIEFILE
     references:
       - kind: esplora
         url: https://mempool.space/api
@@ -94,7 +99,7 @@ func TestInvalid(t *testing.T) {
 	tests := []struct {
 		name, from, to, wantErr string
 	}{
-		{"unknown key", "    notify: [ops]", "    notify: [ops]\n    notfy: [x]", "field notfy not found"},
+		{"unknown key", "    notify: [ops]", "    notify: [ops]\n    notfy: [x]", `line 14: unknown key "notfy" in targets[0] (did you mean "notify"?)`},
 		{"bad interval", "targets:", "interval: 10ms\ntargets:", "interval: must be at least 1s"},
 		{"timeout > interval", "targets:", "interval: 5s\ntimeout: 6s\ntargets:", "timeout:"},
 		{"bad target name", "name: orendil", "name: 'a b'", "targets[0].name"},
@@ -102,8 +107,8 @@ func TestInvalid(t *testing.T) {
 		{"credentials in url", "http://127.0.0.1:8332", "http://u:p@127.0.0.1:8332", "must not contain credentials"},
 		{"plain http to remote node", "http://127.0.0.1:8332", "http://10.0.0.5:8332", "only allowed for loopback"},
 		{"plain http reference", "https://mempool.space/api", "http://mempool.space/api", "only allowed for loopback"},
-		{"no auth", "      cookie_file: /var/lib/bitcoind/.cookie\n", "", "auth required"},
-		{"user without password", "cookie_file: /var/lib/bitcoind/.cookie", "username: u", "password: set password_file or password_env"},
+		{"no auth", "      cookie_file: COOKIEFILE\n", "", "auth required"},
+		{"user without password", "cookie_file: COOKIEFILE", "username: u", "password: set password_file or password_env"},
 		{"missing threshold", "      threshold: 3", "      for: 2", "threshold: required"},
 		{"recover above threshold", "threshold: 3", "threshold: 3\n      recover_threshold: 4", "must not exceed"},
 		{"unknown notifier", "notify: [ops]", "notify: [nope]", `unknown notifier "nope"`},
@@ -111,7 +116,7 @@ func TestInvalid(t *testing.T) {
 		{"token file and env", "bot_token_file: TOKENFILE", "bot_token_file: TOKENFILE\n    bot_token_env: X", "not both"},
 		{"missing token env", "bot_token_file: TOKENFILE", "bot_token_env: NODE_TRACKER_TEST_UNSET", "not set"},
 		{"plain http api_url", "chat_id: \"-1001234567890\"", "chat_id: \"-1001234567890\"\n    api_url: http://example.com", `api_url "http://example.com": plain http`},
-		{"relative cookie path", "cookie_file: /var/lib/bitcoind/.cookie", "cookie_file: bitcoind/.cookie", `cookie_file "bitcoind/.cookie": must be an absolute path`},
+		{"relative cookie path", "cookie_file: COOKIEFILE", "cookie_file: bitcoind/.cookie", `cookie_file "bitcoind/.cookie": must be an absolute path`},
 		{"relative state file", "targets:", "state_file: state.json\ntargets:", `state_file "state.json": must be an absolute path`},
 		{"duplicate reference", "https://mempool.space/api\n", "https://mempool.space/api\n      - kind: esplora\n        url: https://mempool.space/api\n", "duplicate"},
 	}
@@ -155,7 +160,7 @@ func TestErrorShowsValue(t *testing.T) {
 		{"kind", "kind: bitcoind", "kind: geth", `targets[0].node.kind "geth": must be one of [bitcoind]`},
 		{"chat id placeholder", `"-1001234567890"`, `"<chat id>"`,
 			`notifiers[0].chat_id "<chat id>": must be a numeric chat id or @channelname; this looks like a placeholder`},
-		{"env var in path", "cookie_file: /var/lib/bitcoind/.cookie", "cookie_file: $HOME/.bitcoin/.cookie",
+		{"env var in path", "cookie_file: COOKIEFILE", "cookie_file: $HOME/.bitcoin/.cookie",
 			`targets[0].node.cookie_file "$HOME/.bitcoin/.cookie": must be an absolute path or start with ~/; YAML does not expand environment variables`},
 		{"target name", "name: orendil", "name: 'a b'", `targets[0].name "a b": must match`},
 	}
@@ -392,12 +397,25 @@ func TestWarnings(t *testing.T) {
 	}
 }
 
+// A missing cookie is a warning: bitcoind writes it on start.
+func TestMissingCookie(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), ".cookie")
+	c, warns, err := Load(write(t, strings.Replace(valid, "COOKIEFILE", missing, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "targets[0].node.cookie_file: " + missing + " does not exist; bitcoind is not started yet or its datadir is elsewhere. For a remote node, use username and password_file"
+	if len(warns) != 1 || warns[0] != want || c.Targets[0].Node.CookieFile != missing {
+		t.Fatalf("warns = %q", warns)
+	}
+}
+
 func TestEnvSecretAndPassword(t *testing.T) {
 	t.Setenv("NT_TOKEN", secret)
 	t.Setenv("NT_PW", "pw")
 	cfg := strings.NewReplacer(
 		"bot_token_file: TOKENFILE", "bot_token_env: NT_TOKEN",
-		"cookie_file: /var/lib/bitcoind/.cookie", "username: u\n      password_env: NT_PW",
+		"cookie_file: COOKIEFILE", "username: u\n      password_env: NT_PW",
 	).Replace(valid)
 	c, _, err := Load(write(t, cfg))
 	if err != nil {
@@ -412,8 +430,70 @@ func TestEmptyAndMissing(t *testing.T) {
 	if _, _, err := Load(write(t, "")); err == nil {
 		t.Error("empty: want error")
 	}
-	if _, _, err := Load(filepath.Join(t.TempDir(), "nope.yaml")); err == nil {
-		t.Error("missing: want error")
+	path := filepath.Join(t.TempDir(), "nope.yaml")
+	_, _, err := Load(path)
+	if want := "no config at " + path + "; " + NoConfigHint; err == nil || err.Error() != want || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing: err = %v, want %s wrapping fs.ErrNotExist", err, want)
+	}
+}
+
+// YAML type errors are in the config's terms: path, value, what is
+// expected, and no Go type names.
+func TestYAMLErrors(t *testing.T) {
+	tests := []struct{ name, from, to, want string }{
+		{"typo", "      threshold: 3", "      treshold: 3", `line 12: unknown key "treshold" in targets[0].alert (did you mean "threshold"?)`},
+		{"case", "      threshold: 3", "      Threshold: 3", `line 12: unknown key "Threshold" in targets[0].alert (did you mean "threshold"?)`},
+		{"no suggestion", "    notify: [ops]", "    notify: [ops]\n    colour: red", `line 14: unknown key "colour" in targets[0]` + "\n"},
+		{"top level", "targets:", "intervall: 30s\ntargets:", `line 2: unknown key "intervall" at the top level (did you mean "interval"?)`},
+		{"node", "      kind: bitcoind", "      kind: bitcoind\n      cookie: x", `line 6: unknown key "cookie" in targets[0].node` + "\n"},
+		{"flow mapping", "    alert:\n      threshold: 3", "    alert: {threshold: 3, fro: 2}", `line 11: unknown key "fro" in targets[0].alert` + "\n"},
+		{"flow mapping value", "    alert:\n      threshold: 3", "    alert: {threshold: x}", `line 11: targets[0].alert.threshold "x": must be a whole number, 0 or more`},
+		{"notifier", "    chat_id:", "    chatid:", `line 18: unknown key "chatid" in notifiers[0] (did you mean "chat_id"?)`},
+		{"duration", "targets:", "interval: soon\ntargets:", `line 2: interval "soon": must be a duration such as 30s or 5m`},
+		{"negative", "threshold: 3", "threshold: -1", `line 12: targets[0].alert.threshold "-1": must be a whole number, 0 or more`},
+		{"long value", "threshold: 3", "threshold: three-blocks", `line 12: targets[0].alert.threshold "three-blocks": must be a whole number, 0 or more`},
+		{"bool", "      kind: bitcoind", "      kind: bitcoind\n      allow_insecure: maybe", `line 6: targets[0].node.allow_insecure "maybe": must be true or false`},
+		{"list", "notify: [ops]", "notify: {ops: x}", `line 13: targets[0].notify: must be a list`},
+		{"list item", "notify: [ops]", "notify: [[ops]]", `line 13: targets[0].notify[0]: must be a single value, not a list or mapping`},
+		{"mapping", "    alert:\n      threshold: 3", "    alert: 3", `line 11: targets[0].alert "3": must be a mapping of keys and values`},
+		{"reference", "      - kind: esplora\n        url: https://mempool.space/api", "      - https://mempool.space/api", `line 9: targets[0].references[0] "https://mempool.space/api": must be a mapping of keys and values`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := strings.Replace(valid, tt.from, tt.to, 1)
+			if cfg == valid {
+				t.Fatalf("replacement %q did not apply", tt.from)
+			}
+			_, _, err := Load(write(t, cfg))
+			if err == nil || !strings.Contains(err.Error()+"\n", ": invalid config:\n"+tt.want) {
+				t.Fatalf("err = %v\nwant %s", err, tt.want)
+			}
+			if _, msg, _ := strings.Cut(err.Error(), "invalid config:"); strings.Contains(msg, "config.") || strings.Contains(msg, "uint64") || strings.Contains(msg, "time.") {
+				t.Fatalf("Go type name in %v", err)
+			}
+		})
+	}
+	t.Run("all reported", func(t *testing.T) {
+		_, _, err := Load(write(t, strings.NewReplacer("threshold: 3", "treshold: 3", "targets:", "interval: x\ntargets:").Replace(valid)))
+		if err == nil || !strings.Contains(err.Error(), `interval "x"`) || !strings.Contains(err.Error(), `"treshold"`) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("syntax", func(t *testing.T) {
+		if _, _, err := Load(write(t, "targets: [\n")); err == nil || !strings.Contains(err.Error(), "did not find expected node content") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+func TestDistance(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		d    int
+	}{{"", "", 0}, {"", "abc", 3}, {"treshold", "threshold", 1}, {"kitten", "sitting", 3}, {"für", "fur", 1}} {
+		if d := distance(tt.a, tt.b); d != tt.d {
+			t.Errorf("distance(%q, %q) = %d, want %d", tt.a, tt.b, d, tt.d)
+		}
 	}
 }
 
@@ -455,7 +535,12 @@ func TestExampleConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(warns) != 0 || c.Notifiers[0].BotToken != secret {
-		t.Fatalf("warns=%v token resolved=%v", warns, c.Notifiers[0].BotToken == secret)
+	for _, w := range warns { // the example's cookie may not exist here
+		if !strings.HasPrefix(w, "targets[0].node.cookie_file: ") {
+			t.Errorf("warning: %s", w)
+		}
+	}
+	if c.Notifiers[0].BotToken != secret {
+		t.Fatal("token not resolved")
 	}
 }
