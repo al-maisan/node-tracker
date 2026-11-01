@@ -4,7 +4,8 @@ node-tracker reads one YAML file:
 
 1. the path given with `-config`, or
 2. `$XDG_CONFIG_HOME/node-tracker/config.yaml`, which defaults to
-   `~/.config/node-tracker/config.yaml`.
+   `~/.config/node-tracker/config.yaml`. This is the same on every OS,
+   macOS included.
 
 The file is checked strictly. An unknown key, such as a typo, is an error,
 and every problem is reported in one go:
@@ -113,7 +114,7 @@ Bitcoin Core JSON-RPC. Only `getblockchaininfo` is called.
 | Key | Meaning |
 |---|---|
 | `url` | e.g. `http://127.0.0.1:8332`. Must not contain credentials. |
-| `cookie_file` | Bitcoin Core's `.cookie` (e.g. `~/.bitcoin/.cookie`, `/var/lib/bitcoind/.cookie`). It is re-read on every call, so a node restart, which writes a new cookie, needs no action. |
+| `cookie_file` | Bitcoin Core's `.cookie` (e.g. `~/.bitcoin/.cookie`, `/var/lib/bitcoind/.cookie`, on macOS `~/Library/Application Support/Bitcoin/.cookie`). It is re-read on every call, so a node restart, which writes a new cookie, needs no action. |
 | `username` + `password_file` / `password_env` | Use these instead of the cookie, with `rpcauth` credentials. |
 | `allow_insecure` | Allow plain `http://` to a non-loopback host (see below). |
 | `proxy` | Optional proxy for this endpoint only (see [Proxies and Tor](#proxies-and-tor)). |

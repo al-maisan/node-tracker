@@ -133,8 +133,8 @@ in `deploy/`):
 | cron | `once` | intervals of one minute or more |
 | by hand in a terminal | `check` / `once` / `report` / `test-notify` | human-readable output |
 
-Default paths follow the XDG base directory spec, so a user service and a
-manual run need no flags:
+Default paths follow the XDG base directory spec on every OS, macOS
+included, so a user service and a manual run need no flags:
 
 - config: `$XDG_CONFIG_HOME/node-tracker/config.yaml`
   (falls back to `~/.config/node-tracker/config.yaml`)

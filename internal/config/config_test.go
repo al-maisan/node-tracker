@@ -429,6 +429,21 @@ func TestDefaultStatePath(t *testing.T) {
 	}
 }
 
+// The config path is the same on every OS, macOS included.
+func TestDefaultConfigPath(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	for _, tt := range []struct{ xdg, want string }{
+		{"/xdg/config", "/xdg/config/node-tracker/config.yaml"},
+		{"relative", "/home/u/.config/node-tracker/config.yaml"}, // spec: ignore non-absolute
+		{"", "/home/u/.config/node-tracker/config.yaml"},
+	} {
+		t.Setenv("XDG_CONFIG_HOME", tt.xdg)
+		if p, err := DefaultConfigPath(); err != nil || p != tt.want {
+			t.Errorf("XDG_CONFIG_HOME=%q: %s %v, want %s", tt.xdg, p, err, tt.want)
+		}
+	}
+}
+
 // The shipped example must stay valid.
 func TestExampleConfig(t *testing.T) {
 	home := t.TempDir()

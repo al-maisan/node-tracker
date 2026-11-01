@@ -187,7 +187,7 @@ func (in *installer) user(ctx context.Context, exe string) error {
 	if _, err := in.loadConfig(path); err != nil {
 		return err
 	}
-	dir, err := os.UserConfigDir()
+	dir, err := config.DefaultConfigDir()
 	if err != nil {
 		return err
 	}
