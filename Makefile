@@ -4,8 +4,9 @@ BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS    := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
 # Packages are built from the newest stable tag at or below HEAD.
 TAG        ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null)
+RPM_DIR    := $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/node-tracker/rpmbuild
 
-.PHONY: build dist release ppa publish test test-ppa integration lint vuln clean
+.PHONY: build dist release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/node-tracker ./cmd/node-tracker
@@ -23,7 +24,21 @@ release:
 ppa:
 	ppa/build-ppa.sh '$(TAG)' $(PPA_REV)
 
-publish: release ppa
+# The RPM spec of TAG, from node-tracker.spec.
+gen-spec:
+	install -d -m 700 $(RPM_DIR)/SPECS
+	scripts/gen-spec.sh '$(TAG)' $(RPM_DIR)/SPECS/node-tracker.spec
+
+# The source RPM of TAG in $(RPM_DIR)/SRPMS.
+srpm:
+	scripts/srpm.sh '$(TAG)'
+
+# Builds TAG in Fedora COPR for the supported Fedoras and arches that lack it.
+# COPR_FORCE=1 rebuilds; COPR_CHROOTS="fedora-44-x86_64 ..." picks chroots.
+copr:
+	scripts/copr-build.sh '$(TAG)'
+
+publish: release ppa copr
 
 test:
 	go test -race ./...
@@ -33,6 +48,10 @@ test-ppa:
 	ppa/build-ppa_test.sh
 	scripts/pkg-changelog_test.sh
 	scripts/install-units_test.sh
+
+test-copr:
+	scripts/copr-build_test.sh
+	scripts/pkg-changelog_test.sh
 
 # Needs bitcoind in PATH; starts a throwaway regtest node.
 integration:

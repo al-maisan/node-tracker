@@ -397,4 +397,5 @@ because a person reads them.
 Release archives and signed checksums: `make dist` / `make release`, see
 CONTRIBUTING.md. Homebrew: `brew install al-maisan/tap/node-tracker`, the
 formula is written by `make release`. Ubuntu: `ppa:al-maisan/node-tracker`,
-uploaded by `make ppa`. Other packaging (AUR) is tracked in issue #8.
+uploaded by `make ppa`. Fedora: COPR `al-maisan/node-tracker`, built by
+`make copr`. Other packaging (AUR) is tracked in issue #8.

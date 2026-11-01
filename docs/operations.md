@@ -46,8 +46,8 @@ edit `OnUnitActiveSec=`.
 
 ### From a package
 
-The deb package has installed the binary, the units and the `node-tracker`
-user, so only the config and the token are left:
+The deb or rpm package has installed the binary, the units and the
+`node-tracker` user, so only the config and the token are left:
 
 ```sh
 sudo install -d -m 750 -o root -g node-tracker /etc/node-tracker

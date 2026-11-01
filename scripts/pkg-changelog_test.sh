@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for pkg-changelog.sh: make test-ppa
+# Tests for pkg-changelog.sh: make test-ppa, make test-copr
 # No network: runs the helpers on a throwaway git repo.
 set -uo pipefail
 
@@ -41,5 +41,28 @@ check "deb: commits since the previous release, UTC date" "node-tracker (1.1.0-1
 check "deb: first release lists its commits" "  * Initial commit" "$(deb_entry v1.0.0 1.0.0-1ppa1~resolute1 resolute <<<v1.0.0 | sed -n 3p)"
 check "deb: release without commits" "  * Release v1.1.1." \
 	"$(printf 'v1.1.1\nv1.1.0\n' | deb_entry v1.1.1 1.1.1-1ppa1~resolute1 resolute | sed -n 3p)"
+
+check "rpm: escape doubles %" "- 100%% done, %%(id) %%{version} \$(id)" "$(rpm_escape <<<'- 100% done, %(id) %{version} $(id)')"
+commit 2026-11-02T00:30:00+0100 "Fix %(touch $tmp/pwned) and \$(touch $tmp/pwned2) at 100%"
+g tag v1.2.0
+check "rpm: one entry per release, newest first, escaped" "* Sun Nov 01 2026 Muharem Hrnjadovic <muharem@linux.com> - 1.2.0-1
+- Fix %%(touch $tmp/pwned) and \$(touch $tmp/pwned2) at 100%%
+
+* Sun Nov 01 2026 Muharem Hrnjadovic <muharem@linux.com> - 1.1.0-1
+- Add a feature (#2)
+- Fix 100%% of \$(id) bugs
+
+* Thu Oct 01 2026 Muharem Hrnjadovic <muharem@linux.com> - 1.0.0-1
+- Initial commit" "$(printf 'v1.2.0\nv1.1.0\nv1.0.0\n' | rpm_changelog)"
+
+# With rpm installed: the escaped changelog renders literally and runs nothing.
+if command -v rpmspec >/dev/null; then
+	{
+		printf 'Name: x\nVersion: 1\nRelease: 1\nSummary: x\nLicense: MIT\n%%description\nx\n%%changelog\n'
+		printf 'v1.2.0\nv1.1.0\n' | rpm_changelog
+	} >"$tmp/x.spec"
+	check "rpmspec: renders literally" "- Fix %(touch $tmp/pwned) and \$(touch $tmp/pwned2) at 100%" "$(rpmspec -P "$tmp/x.spec" 2>/dev/null | grep "^- Fix %")"
+	check "rpmspec: nothing run" "no" "$(if [[ -e $tmp/pwned || -e $tmp/pwned2 ]]; then echo yes; else echo no; fi)"
+fi
 
 exit "$fail"

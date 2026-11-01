@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Prints a package changelog from the GitHub releases up to a stable tag:
+#   rpm <tag>                    the RPM %changelog: one entry per release
 #   deb <tag> <version> <dist>   the debian/changelog entry for <tag>
 # An entry lists the commits since the previous release (or the last 20 for
 # the first one). The tag counts as released even before its GitHub release
@@ -43,6 +44,24 @@ tag_date() {
 	LC_ALL=C TZ=UTC git log -1 --format=%cd --date="format-local:$2" "$1^{commit}"
 }
 
+# Escapes '%' on stdin as '%%': rpm expands macros in %changelog, so a commit
+# subject like "%(cmd)" would run cmd during the build. '$' needs nothing.
+rpm_escape() {
+	sed 's/%/%%/g'
+}
+
+# Prints the RPM %changelog for the release list (newest first) on stdin.
+rpm_changelog() {
+	local -a tags
+	local i
+	mapfile -t tags
+	for i in "${!tags[@]}"; do
+		echo "* $(tag_date "${tags[i]}" '%a %b %d %Y') $maintainer - ${tags[i]#v}-1"
+		items '- ' "${tags[i]}" "${tags[i + 1]:-}"
+		echo
+	done | rpm_escape
+}
+
 # Prints the debian/changelog entry for <tag>, given the release list (newest
 # first) on stdin.
 deb_entry() {
@@ -58,7 +77,7 @@ deb_entry() {
 # The functions above are sourced by pkg-changelog_test.sh; stop here in that case.
 if [[ ${BASH_SOURCE[0]} != "$0" ]]; then return 0; fi
 
-(($# >= 2)) || die "usage: $0 deb <tag> <version> <dist>"
+(($# >= 2)) || die "usage: $0 rpm <tag> | deb <tag> <version> <dist>"
 format=$1 tag=$2
 [[ $tag =~ $stable ]] || die "tag '$tag' is not vMAJOR.MINOR.PATCH"
 git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null || die "tag '$tag' not found"
@@ -70,6 +89,10 @@ for t in $releases; do
 done
 
 case $format in
+rpm)
+	(($# == 2)) || die "usage: $0 rpm <tag>"
+	rpm_changelog <<<"$releases"
+	;;
 deb)
 	(($# == 4)) || die "usage: $0 deb <tag> <version> <dist>"
 	[[ $3 =~ ^[0-9][0-9A-Za-z.+~-]*$ ]] || die "invalid version '$3'"
