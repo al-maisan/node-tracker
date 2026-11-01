@@ -32,7 +32,7 @@ targets:
         url: https://mempool.space/api
       - kind: esplora
         url: https://blockstream.info/api
-    # reference_outlier: 6    # ignore a reference this many blocks above all others (0 = off)
+    # reference_outlier: 6    # with 3+ references: ignore one this far above all others (0 = off)
 
     alert:
       threshold: 3            # LAGGING when the node is more than 3 blocks behind

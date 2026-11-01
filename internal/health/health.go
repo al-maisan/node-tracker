@@ -31,7 +31,7 @@ type Rule struct {
 	Threshold uint64 // LAGGING when lag > Threshold
 	Recover   uint64 // back to OK when lag <= Recover (Recover <= Threshold)
 	For       int    // a change must be seen For samples in a row (>= 1)
-	Outlier   uint64 // with 2+ references, ignore one more than this many blocks above the rest; 0 = off
+	Outlier   uint64 // with 3+ references, ignore one more than this many blocks above all others; 0 = off
 }
 
 // Reading is the result of querying one source.
@@ -84,11 +84,14 @@ func Observe(s Sample, r Rule, lagging bool) Observation {
 		}
 	}
 	// One broken or tampered reference must not pin the target in LAGGING:
-	// a reference far above all other references is ignored. The node's own
-	// headers are not compared, since an isolated node's headers are behind.
+	// a reference far above all other references is ignored. That needs at
+	// least two others to outvote it; with two references that disagree,
+	// the honest one can't be told apart (it may be stuck with the node, e.g.
+	// a local electrs), so the higher one wins. The node's own headers are
+	// not compared, since an isolated node's headers are behind.
 	slices.SortStableFunc(ok, func(a, b Reading) int { return cmp.Compare(b.Tip(), a.Tip()) })
 	var outliers []string
-	for r.Outlier > 0 && len(ok) >= 2 && ok[0].Tip()-ok[1].Tip() > r.Outlier {
+	for r.Outlier > 0 && len(ok) >= 3 && ok[0].Tip()-ok[1].Tip() > r.Outlier {
 		outliers, ok = append(outliers, ok[0].Source), ok[1:]
 	}
 	o.Outliers = strings.Join(outliers, ",")
@@ -147,16 +150,21 @@ func (t Target) Lagging() bool { return t.LastLag == Lagging }
 // target state and whether a change must be alerted. The very first state of
 // a target is set silently when it is OK.
 //
-// Any sample that differs from the current state counts toward leaving it,
-// even if those samples differ from each other: LAGGING, NODE_DOWN, LAGGING
-// is just as much "not OK" as LAGGING three times. The target then moves to
-// the latest observed state.
+// Samples count in two groups: OK, and "not OK" (LAGGING, NODE_DOWN,
+// NO_REFERENCE). Bad states count together, so LAGGING, NODE_DOWN, LAGGING
+// is as much "not OK" as LAGGING three times, and the target moves to the
+// latest one. OK must be seen For times in a row on its own: one good
+// sample after trouble is not recovery.
 func Step(t Target, observed State, r Rule, now time.Time) (next Target, alert bool) {
 	if observed == t.Current {
 		return Target{Current: t.Current, Since: t.Since, LastLag: t.LastLag}, false
 	}
+	if t.Seen > 0 && (observed == OK) == (t.Candidate == OK) {
+		t.Seen++
+	} else {
+		t.Seen = 1
+	}
 	t.Candidate = observed
-	t.Seen++
 	if t.Seen < max(r.For, 1) {
 		return t, false
 	}

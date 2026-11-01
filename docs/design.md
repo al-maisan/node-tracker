@@ -51,11 +51,15 @@ every reference is down.
   is easy to spot.
 - A single reference that is broken or tampered with (e.g. reached over
   plain http) could still pin the target in `LAGGING` with an absurd
-  height. With two or more responding references, a reference more than
-  `reference_outlier` blocks (default 6) **above every other reference** is
-  ignored and logged. The node's own headers are not part of that
-  comparison: an isolated node's headers are behind by definition, and
-  must not make honest references look like outliers.
+  height. With **three or more** responding references, a reference more
+  than `reference_outlier` blocks (default 6) **above every other
+  reference** is ignored and logged.
+  - Two references can't outvote each other: with two that disagree, the
+    lower one may be stuck along with the node (a local electrs), so the
+    higher one wins.
+  - The node's own headers are not part of the comparison: an isolated
+    node's headers are behind by definition, and must not make honest
+    references look like outliers.
 
 ## 3. Health states
 
@@ -73,12 +77,15 @@ Rules:
 - An alert is sent **only on a state change** (no repeats while the state
   stays the same). This is the "crossed upward / downward" behaviour:
   `OK → LAGGING` is the upward crossing, `LAGGING → OK` the downward one.
-- **Debounce:** the target must look different from its current state for
-  `for` samples in a row (default 2) before the state changes. This stops
-  flapping, e.g. when a reference sees a new block a few seconds before the
-  node does. Different bad states count together, and the target takes the
-  latest one. Otherwise a node alternating between `LAGGING` and
-  `NODE_DOWN` would reset the counter forever and never alert.
+- **Debounce:** a change must be seen for `for` samples in a row (default
+  2) before the state changes. This stops flapping, e.g. when a reference
+  sees a new block a few seconds before the node does. Samples count in two
+  groups:
+  - The bad states (`LAGGING`, `NODE_DOWN`, `NO_REFERENCE`) count together,
+    and the target takes the latest one. Otherwise a node alternating
+    between `LAGGING` and `NODE_DOWN` would reset the counter forever and
+    never alert.
+  - `OK` counts on its own: one good sample after trouble is not recovery.
 - **Optional hysteresis:** `recover_threshold` (default = `threshold`). The
   state goes back to `OK` only when lag ≤ `recover_threshold`. The last
   OK/LAGGING verdict is stored separately from the current state, so the

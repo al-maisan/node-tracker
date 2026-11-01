@@ -56,10 +56,10 @@ Durations use Go syntax: `90s`, `5m`, `1h30m`.
 | `name` | string | *required* | Unique. 1–64 of `A–Z a–z 0–9 . _ -`. Shown in alerts. |
 | `node` | endpoint | *required* | The node being watched. Kinds: `bitcoind`. |
 | `references` | list of endpoints | none | Independent views of the chain tip. Kinds: `esplora`, `bitcoind`. |
-| `reference_outlier` | integer | `6` | With 2+ responding references, a reference more than this many blocks above all the others is ignored (and logged). `0` turns it off. |
+| `reference_outlier` | integer | `6` | With 3+ responding references, a reference more than this many blocks above all the others is ignored (and logged). `0` turns it off. |
 | `alert.threshold` | integer | *required* | `LAGGING` when lag **>** this many blocks. |
 | `alert.recover_threshold` | integer | `threshold` | Back to `OK` when lag **≤** this. Must be ≤ `threshold`. |
-| `alert.for` | integer | `2` | The target must look different from its current state this many ticks in a row before the state changes (1–100). Different bad states count together: `LAGGING, NODE_DOWN` leaves `OK` just like `LAGGING, LAGGING`, and the target takes the latest state. |
+| `alert.for` | integer | `2` | Ticks in a row a change must be seen before the state changes (1–100). Bad states count together: `LAGGING, NODE_DOWN` leaves `OK` just like `LAGGING, LAGGING`, and the target takes the latest state. Returning to `OK` needs this many `OK` ticks in a row. |
 | `notify` | list of names | *required* | Notifiers that get this target's alerts. |
 
 **References:** without any, lag is measured against the node's own header
@@ -72,12 +72,17 @@ never hides a problem.
 The *highest* rule has one weakness: a single broken or tampered reference
 (for example plain http with `allow_insecure`) could report a height far
 ahead and keep the target `LAGGING` forever. `reference_outlier` guards
-against that. A reference that is more than that many blocks above *every
-other reference* is ignored. Honest references are within a block or two of
-each other, so this never hides a real lag. The node's own headers are not
-part of this comparison, because an isolated node's headers are behind by
-definition. With a single responding reference there is nothing to compare,
-so it is trusted.
+against that. With **three or more** responding references, a reference
+that is more than that many blocks above *every other reference* is
+ignored. Honest references are within a block or two of each other, so
+this never hides a real lag.
+
+With only two references that disagree, there is no way to tell which one
+is wrong. One of them may be stuck along with your node, e.g. your own
+electrs. So the higher one wins, and you get an alert to look at, never a
+missed lag. The node's own headers are never part of this comparison,
+because an isolated node's headers are behind by definition. To get
+outlier protection, configure three references.
 
 ### Choosing the thresholds
 

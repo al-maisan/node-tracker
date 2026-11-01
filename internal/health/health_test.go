@@ -57,6 +57,11 @@ func TestObserve(t *testing.T) {
 			want: Observation{NodeSource: "node", State: OK, Node: 100, Tip: 100, TipFrom: "node"},
 		},
 		{
+			name: "two references that disagree: the higher one wins",
+			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("mempool", 150), ref("own-electrs", 100)}},
+			want: Observation{NodeSource: "node", State: Lagging, Lag: 50, Node: 100, Tip: 150, TipFrom: "mempool"},
+		},
+		{
 			name: "reference far above the others is ignored",
 			s:    Sample{Node: node(100, 100), Refs: []Reading{ref("liar", 999999), ref("a", 101), ref("b", 100)}},
 			want: Observation{NodeSource: "node", State: OK, Lag: 1, Node: 100, Tip: 101, TipFrom: "a", Outliers: "liar"},
@@ -170,6 +175,29 @@ func TestStep(t *testing.T) {
 			steps: []step{
 				{Lagging, false, OK},
 				{NodeDown, false, OK},
+				{Lagging, true, Lagging},
+			},
+		},
+		{
+			name:  "one OK sample after trouble is not recovery",
+			start: Target{Current: Lagging},
+			For:   2,
+			steps: []step{
+				{NodeDown, false, Lagging},
+				{NodeDown, true, NodeDown},
+				{OK, false, NodeDown},
+				{Lagging, false, NodeDown},
+				{OK, false, NodeDown},
+				{OK, true, OK},
+			},
+		},
+		{
+			name:  "bad sample interrupts recovery",
+			start: Target{Current: NodeDown},
+			For:   2,
+			steps: []step{
+				{OK, false, NodeDown},
+				{Lagging, false, NodeDown},
 				{Lagging, true, Lagging},
 			},
 		},
