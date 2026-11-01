@@ -87,6 +87,11 @@ func (c *Client) Height(ctx context.Context) (source.Height, error) {
 	}
 	req.SetBasicAuth(user, pass)
 	req.Header.Set("Content-Type", "application/json")
+	// getblockchaininfo is read-only, so the transport may resend it when a
+	// kept-alive connection turns out closed: bitcoind drops idle ones after
+	// rpcservertimeout (30 s), about the polling interval. The empty key is
+	// not sent.
+	req.Header["Idempotency-Key"] = nil
 
 	status, body, err := httpx.Do(c.http, req, maxBody)
 	if err != nil {
