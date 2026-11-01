@@ -207,6 +207,7 @@ func fakeSetup(t *testing.T, tg *fakeTG, ft *fakeTerm) (h *setupHost, installs *
 		},
 		hostname:    func() (string, error) { return "orendil.example.org", nil },
 		telegramAPI: tg.srv.URL,
+		torProxy:    config.DefaultTorProxy,
 		poll:        time.Second,
 		waitChat:    20 * time.Second,
 	}
@@ -358,8 +359,9 @@ func TestSetupOnionNode(t *testing.T) {
 		turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", answer: "http://" + onion + ":8332"},
 		turn{prompt: "Tor SOCKS proxy [socks5://127.0.0.1:9050]: ", answer: "socks5://127.0.0.1:1"},
 		turn{prompt: "Tor SOCKS proxy [socks5://127.0.0.1:9050]: ", answer: "socks5://" + socks.addr},
+		turn{prompt: "Do you already have the node's RPC user and password? (Umbrel, myNode, RaspiBlitz, StartOS: yes) [Y/n] ", answer: "n"},
 		turn{prompt: "RPC user [nodetracker]: "},
-		turn{prompt: "Generate a new password and the rpcauth line for the node's bitcoin.conf? [Y/n] "},
+		turn{prompt: "Generate a new password and the rpcauth line for the node's bitcoin.conf? [y/N] ", answer: "y"},
 		turn{prompt: "Press Enter when bitcoind has restarted: "},
 		turn{prompt: "Name of this node in alerts [node]: ", answer: "home"},
 		turn{prompt: "[https://mempool.space/api https://blockstream.info/api]: ", answer: "none"},
@@ -415,6 +417,128 @@ func TestSetupOnionNode(t *testing.T) {
 	}
 	if got := tg.messages(); len(got) != 1 || !strings.HasPrefix(got[0], "@mychannel: ") {
 		t.Errorf("sent %q", got)
+	}
+}
+
+// A node box on this host: its RPC user and password are typed, nothing is
+// generated. Telegram does not answer, so the token is kept untested and
+// the chat id typed.
+func TestSetupExistingUserTelegramDown(t *testing.T) {
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	ft := newFakeTerm(t,
+		turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", answer: w.srv.URL + "/rpc"},
+		turn{prompt: "Use bitcoind's cookie file for auth? [Y/n] ", answer: "n"},
+		turn{prompt: "Do you already have the node's RPC user and password? (Umbrel, myNode, RaspiBlitz, StartOS: yes) [y/N] ", answer: "y"},
+		turn{prompt: "RPC user: ", answer: "umbrel"},
+		turn{prompt: "RPC password (input hidden): ", answer: "boxPW", secret: true},
+		turn{prompt: "Name of this node in alerts [orendil]: "},
+		turn{prompt: "References", answer: "none"},
+		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
+		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: "},
+		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: ", answer: "t"},
+		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: ", answer: "k"},
+		turn{prompt: "Chat id or @channel: ", answer: "42"},
+		turn{prompt: "Install and start the systemd service now", answer: "n"},
+	)
+	h, _ := fakeSetup(t, newFakeTG(t), ft)
+	h.telegramAPI, h.torProxy = "http://127.0.0.1:1", "socks5://127.0.0.1:1" // Tor is down too
+	code, errs := runSetup(context.Background(), ft, "setup")
+	out := ft.transcript()
+	t.Logf("transcript:\n%s", out)
+	ft.done()
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, errs)
+	}
+	for _, s := range []string{
+		"Testing the node … ok: chain main, height 938,266\n",
+		"could not check the token with Telegram: Get \"http://127.0.0.1:1\": dial tcp 127.0.0.1:1: connect: connection refused\n",
+		"Tor does not answer at socks5://127.0.0.1:1: dial tcp 127.0.0.1:1: connect: connection refused. Install and start Tor",
+		"Token …OKEN kept untested.",
+		"Once Telegram answers, send a test message: node-tracker test-notify\n",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("no %q in the transcript", s)
+		}
+	}
+	if n := strings.Count(out, "could not check the token"); n != 2 {
+		t.Errorf("token checked %d times, want 2: once, and on retry", n)
+	}
+	if strings.Contains(out, "rpcauth") || strings.Contains(out, "boxPW") || strings.Contains(out, tgToken) {
+		t.Error("rpcauth offered, or a secret shows")
+	}
+	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "node-tracker", "config.yaml")
+	cfg, _, err := config.LoadEnv(path, detectEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, tn := cfg.Targets[0].Node, cfg.Notifiers[0]; n.Username != "umbrel" || n.Password != "boxPW" || tn.ChatID != "42" || tn.Proxy != "" {
+		t.Errorf("config %+v", cfg)
+	}
+}
+
+// A node not on this host: generating the rpcauth line defaults to no.
+// Telegram is reached only through Tor, which then goes into the config.
+func TestSetupRemoteNodeTelegramTor(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	nodeSOCKS := newSOCKS5(t, w.srv.Listener.Addr().String())
+	tg := newFakeTG(t)
+	tg.updates = func(ctx context.Context, _ int64) (int, string) {
+		// Short polls: the fake SOCKS server does not pass on the client's close.
+		select {
+		case <-ctx.Done():
+		case <-time.After(50 * time.Millisecond):
+		}
+		return 200, `{"ok":true,"result":[]}`
+	}
+	tor := "socks5://" + newSOCKS5(t, tg.srv.Listener.Addr().String()).addr
+	ft := newFakeTerm(t,
+		turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", answer: "http://" + onion + ":8332"},
+		turn{prompt: "Tor SOCKS proxy [socks5://127.0.0.1:9050]: ", answer: "socks5://" + nodeSOCKS.addr},
+		turn{prompt: "Do you already have the node's RPC user and password? (Umbrel, myNode, RaspiBlitz, StartOS: yes) [Y/n] ", answer: "n"},
+		turn{prompt: "RPC user [nodetracker]: "},
+		turn{prompt: "Generate a new password and the rpcauth line for the node's bitcoin.conf? [y/N] "},
+		turn{prompt: "RPC password (input hidden): ", answer: "s3cret", secret: true},
+		turn{prompt: "Name of this node in alerts [node]: "},
+		turn{prompt: "References", answer: "none"},
+		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
+		turn{prompt: "or [t]ry through Tor (" + tor + ")? [r]: ", answer: "t"},
+		turn{prompt: "press Enter)\n", answer: "42"},
+		turn{prompt: "Install and start the systemd service now", answer: "n"},
+	)
+	h, _ := fakeSetup(t, tg, ft)
+	h.telegramAPI, h.torProxy = "http://127.0.0.1:1", tor
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	code, errs := runSetup(context.Background(), ft, "setup", "-config", path)
+	out := ft.transcript()
+	t.Logf("transcript:\n%s", out)
+	ft.done()
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, errs)
+	}
+	for _, s := range []string{"Bot: @nt_test_bot (token …OKEN)\n", "Sending a test message … sent.", "notifier telegram  token valid (@nt_test_bot)"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("no %q in the transcript", s)
+		}
+	}
+	if strings.Contains(out, "rpcauth=") || strings.Contains(out, "s3cret") {
+		t.Error("rpcauth generated, or the password shows")
+	}
+	if got := tg.messages(); len(got) != 1 || !strings.HasPrefix(got[0], "42: ") {
+		t.Errorf("sent %q", got)
+	}
+	cfg, _, err := config.LoadEnv(path, detectEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := cfg.Notifiers[0]; n.Proxy != tor || n.APIURL != "http://127.0.0.1:1" || cfg.Targets[0].Node.Password != "s3cret" {
+		t.Errorf("config %+v", cfg)
 	}
 }
 
@@ -612,20 +736,28 @@ func TestSetupNonInteractiveProxy(t *testing.T) {
 	w.node.Store(938266)
 	w.tip.Store(938266)
 	socks := newSOCKS5(t, w.srv.Listener.Addr().String())
-	fakeSetup(t, newFakeTG(t), nil)
 	src := t.TempDir()
 	pwSrc, tokSrc := filepath.Join(src, "pw"), filepath.Join(src, "tok")
 	os.WriteFile(pwSrc, []byte("s3cret\n"), 0o600)
 	os.WriteFile(tokSrc, []byte(tgToken+"\n"), 0o600)
+	tg := newFakeTG(t)
+	tgSOCKS := "socks5://" + newSOCKS5(t, tg.srv.Listener.Addr().String()).addr
+	h, _ := fakeSetup(t, tg, nil)
+	h.telegramAPI = "http://127.0.0.1:1" // reached only through -telegram-proxy
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	var out bytes.Buffer
-	code, errs := runSetup(context.Background(), &out, "setup", "-non-interactive", "-config", path, "-node-url", "http://"+onion+":8332",
-		"-proxy", "socks5://"+socks.addr, "-rpc-user", "tracker", "-rpc-password-file", pwSrc, "-token-file", tokSrc, "-chat-id", "42", "-references", "none")
-	if code != exitOK || !strings.Contains(out.String(), "node http://"+onion+":8332: chain main") {
+	args := []string{"setup", "-non-interactive", "-config", path, "-node-url", "http://" + onion + ":8332", "-proxy", "socks5://" + socks.addr,
+		"-rpc-user", "tracker", "-rpc-password-file", pwSrc, "-token-file", tokSrc, "-chat-id", "42", "-references", "none"}
+	code, errs := runSetup(context.Background(), &out, append(args, "-telegram-proxy", tgSOCKS)...)
+	if code != exitOK || !strings.Contains(out.String(), "node http://"+onion+":8332: chain main") || !strings.Contains(out.String(), "test message sent\n") {
 		t.Fatalf("code = %d\n%s\n%s", code, out.String(), errs)
 	}
+	if code, errs := runSetup(context.Background(), io.Discard, append(args, "-telegram-proxy", "tor://x")...); code != exitUsage ||
+		!strings.Contains(errs, `-telegram-proxy "tor://x": scheme must be one of`) {
+		t.Errorf("bad -telegram-proxy: code=%d\n%s", code, errs)
+	}
 	cfg, _, err := config.LoadEnv(path, detectEnv)
-	if err != nil || cfg.Targets[0].Node.Proxy != "socks5://"+socks.addr {
+	if err != nil || cfg.Targets[0].Node.Proxy != "socks5://"+socks.addr || cfg.Notifiers[0].Proxy != tgSOCKS {
 		t.Fatalf("config %+v, %v", cfg, err)
 	}
 }

@@ -23,7 +23,10 @@ between versions.
   through the box's Tor onion service; the monitoring host needs Tor, see
   [Tor](operations.md#tor).
 
-Either way, use `username` + `password_file`, not `cookie_file`. Put the
+Either way, use `username` + `password_file`, not `cookie_file`.
+`node-tracker setup` writes both when you answer **y** to "Do you already
+have the node's RPC user and password?"; each box's section below says
+what to answer. Put the
 password in a file only node-tracker's user can read (`cat` waits for it:
 paste it, press Enter, then Ctrl-D):
 
@@ -90,6 +93,11 @@ without it they would be denied.
 - **On the box:** ssh in and use `http://10.21.21.8:8332` with
   `allow_insecure: true`, as above. Whether the host's own connection
   passes `rpcallowip`: run the curl check **(check on your box)**.
+- **With `node-tracker setup`:** answer the Tor host from **RPC Details**
+  as `http://<host>.onion:8332` (on the box: `http://10.21.21.8:8332`, and
+  **y** to the trusted network), **y** to "Do you already have the node's
+  RPC user and password?", user `umbrel` and the password from **RPC
+  Details**.
 - **Own read-only user:** add the `rpcauth`, `rpcwhitelist` and
   `rpcwhitelistdefault=0` lines under the app's settings, **Custom
   bitcoin.conf overrides** (which settings tab: check on your box).
@@ -115,6 +123,9 @@ StartOS itself and the LAN address were not tested.
   once; only a hash is kept, so put it in the password file right away.
   `rpcuser`/`rpcpassword` lines are not supported. Where the RPC Tor
   address is shown: check on your box.
+- **With `node-tracker setup`:** answer the Tor address with `:8332` as
+  `http://<host>.onion:8332`, **y** to "Do you already have the node's RPC
+  user and password?", and the user name and password from above.
 - **Own read-only user:** the 0.3.5 docs say per-user RPC restrictions are
   not available. Whether `rpcwhitelist` lines can be added on 0.4: check on
   your box.
@@ -138,6 +149,10 @@ and [instructions.md](https://github.com/Start9Labs/bitcoin-core-startos/blob/31
   `allow_insecure`.
 - **From another machine:** add the hidden service in the menu, then use
   its Tor host.
+- **With `node-tracker setup`:** on the box, answer `http://127.0.0.1:8332`,
+  **n** to the cookie file, **y** to "Do you already have the node's RPC
+  user and password?", user `raspibolt` and Password B. From another
+  machine, answer `http://<host>.onion:8332` instead.
 - **Own read-only user:** add the lines to `bitcoin.conf` and run
   `sudo systemctl restart bitcoind`. Whether RaspiBlitz updates keep them:
   check on your box.
@@ -159,6 +174,11 @@ v1.11 path: [assets/bitcoin.conf](https://github.com/raspiblitz/raspiblitz/blob/
   mkdir -p ~/.config/node-tracker && install -m 600 /dev/null ~/.config/node-tracker/node-rpc-password && sudo cat /mnt/hdd/mynode/settings/.btcrpcpw > ~/.config/node-tracker/node-rpc-password
   ```
 
+- **With `node-tracker setup`:** on the box, answer `http://127.0.0.1:8332`,
+  **n** to the cookie file, **y** to "Do you already have the node's RPC
+  user and password?", user `mynode` and the password from `.btcrpcpw`
+  (`sudo cat` it in another terminal). Over Tor, answer
+  `http://<host>.onion:8332` instead.
 - **Own read-only user: not possible.** myNode rewrites every `rpcauth=`
   line in `bitcoin.conf` to its own user at startup, so use `mynode`.
 - **Network:** RPC listens on all interfaces and accepts loopback and

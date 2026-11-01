@@ -255,6 +255,7 @@ example a LAN or a WireGuard tunnel. A notifier's `api_url` must use
 |---|---|---|
 | `name` | string | Unique; used in `targets[].notify` and `test-notify <name>`. Same rules as target names. |
 | `kind` | string | `telegram` |
+| `proxy` | string | Optional proxy for this notifier only, e.g. `socks5://127.0.0.1:9050` (see [Proxies and Tor](#proxies-and-tor)). With a plain-http `api_url`, it must be a loopback proxy, as it would see the bot token. |
 
 ### `kind: telegram`
 
@@ -268,14 +269,23 @@ example a LAN or a WireGuard tunnel. A notifier's `api_url` must use
 
 ## Proxies and Tor
 
-An endpoint with `proxy:` sends its requests through that proxy and
-ignores the proxy environment variables:
+An endpoint or a notifier with `proxy:` sends its requests through that
+proxy and ignores the proxy environment variables:
 
 ```yaml
 node:
   kind: bitcoind
   url: https://node.example.com:8332
   proxy: socks5://127.0.0.1:9050
+```
+
+```yaml
+notifiers:
+  - name: telegram
+    kind: telegram
+    bot_token_file: ~/.config/node-tracker/telegram-token
+    chat_id: "123456789"
+    proxy: socks5://127.0.0.1:9050
 ```
 
 - Schemes: `socks5`, `socks5h`, `http`, `https`. Both SOCKS schemes send
@@ -311,17 +321,18 @@ node:
 - The address must be a valid v3 onion address (56 characters, with a
   checksum), so a typo is reported by `check` instead of a Tor timeout.
 
-Endpoints without `proxy:`, and notifiers, use the standard proxy variables
+Endpoints and notifiers without `proxy:` use the standard proxy variables
 `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, and `socks5://` proxies are
-supported. To send references and Telegram through Tor while the local
-node is reached directly:
+supported. On a host that reaches the internet only through Tor, set
+`proxy: socks5://127.0.0.1:9050` on the notifier and on each reference.
+`node-tracker setup` writes the notifier's when you pick
+**[t]ry through Tor** (or give `-telegram-proxy`). The service then needs
+no environment variables. The variables still work, e.g. for a run in a
+terminal:
 
 ```sh
 HTTPS_PROXY=socks5://127.0.0.1:9050 NO_PROXY=127.0.0.1,localhost node-tracker run
 ```
-
-With systemd, use `Environment=HTTPS_PROXY=socks5://127.0.0.1:9050` in a
-drop-in (`systemctl edit node-tracker`).
 
 To watch a node that is reachable only as a Tor onion service, see
 [Tor](operations.md#tor).

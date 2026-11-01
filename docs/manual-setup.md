@@ -20,7 +20,10 @@ Copy [examples/config.yaml](../examples/config.yaml) to
 `~/.config/node-tracker/config.yaml`, then set your node's URL,
 `cookie_file` and `chat_id`. For a local bitcoind, the
 [minimal config](configuration.md#minimal-config) is 8 lines. For a node
-elsewhere, e.g. over Tor, see [operations.md](operations.md#tor).
+elsewhere, e.g. over Tor, see [operations.md](operations.md#tor). If
+this host reaches Telegram only through Tor, add
+`proxy: socks5://127.0.0.1:9050` to the notifier (see
+[Proxies and Tor](configuration.md#proxies-and-tor)).
 
 ## 3. Check
 
@@ -49,7 +52,8 @@ node-tracker setup -non-interactive -token-file /run/secrets/telegram-token -cha
 Without `-node-url` it watches the detected local bitcoind with its
 cookie. For a node elsewhere add `-node-url`, and `-cookie-file`, or
 `-rpc-user` with `-rpc-password-file`; for Tor on another port than
-9050, `-proxy socks5://127.0.0.1:9150`. `-references` (comma-separated
+9050, `-proxy socks5://127.0.0.1:9150`. To reach Telegram through Tor,
+`-telegram-proxy socks5://127.0.0.1:9050`. `-references` (comma-separated
 Esplora API URLs, or `none`), `-preset fast|balanced|quiet` and `-name`
 are optional. A file that exists and differs is replaced only with
 `-force`, keeping the old config (not old secrets) as `.bak`. The node and references are tested and a test

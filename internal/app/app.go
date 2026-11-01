@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -55,7 +56,11 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 		if !ok {
 			return nil, fmt.Errorf("notifier %s: kind %q not implemented", n.Name, n.Kind)
 		}
-		m.Notifiers[n.Name] = mk(n, hc)
+		nc, err := Client(n.Proxy, hc)
+		if err != nil {
+			return nil, fmt.Errorf("notifier %s: %w", n.Name, err)
+		}
+		m.Notifiers[n.Name] = mk(n, nc)
 	}
 	for _, t := range c.Targets {
 		node, err := NewSource(t.Node, hc)
@@ -88,18 +93,28 @@ func NewSource(e config.Endpoint, hc *http.Client) (source.Source, error) {
 	if !ok {
 		return nil, fmt.Errorf("source kind %q not implemented", e.Kind)
 	}
-	if e.Proxy != "" {
-		u, err := url.Parse(e.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("%s: invalid proxy", e.Name)
-		}
-		hc = httpx.NewProxyClient(u)
+	hc, err := Client(e.Proxy, hc)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", e.Name, err)
 	}
 	s := mk(e, hc)
 	if e.Timeout > 0 {
 		s = source.WithTimeout(s, e.Timeout)
 	}
 	return s, nil
+}
+
+// Client is hc, or a client of its own for proxy, which must be validated
+// (config.Load or config.CheckProxy).
+func Client(proxy string, hc *http.Client) (*http.Client, error) {
+	if proxy == "" {
+		return hc, nil
+	}
+	u, err := url.Parse(proxy)
+	if err != nil {
+		return nil, errors.New("invalid proxy")
+	}
+	return httpx.NewProxyClient(u), nil
 }
 
 // Proxy describes the proxy e's requests go through: e.Proxy (marked if it
