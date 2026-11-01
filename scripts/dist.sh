@@ -29,6 +29,7 @@ for t in "${targets[@]}"; do
 	GOOS=$os GOARCH=$goarch GOARM=$goarm \
 		go build -trimpath -ldflags "$LDFLAGS" -o "$stage/node-tracker" ./cmd/node-tracker
 	cp -R README.md LICENSE assets deploy docs "$stage/"
+	rm "$stage"/deploy/*.go # embeds the units for install-service; not for users
 	cp examples/config.yaml "$stage/examples/"
 	tar --sort=name --owner=0 --group=0 --numeric-owner --mode=go-w,a+rX \
 		--mtime="@$mtime" -C dist -cf - "$name" | gzip -9n >"$stage.tar.gz"

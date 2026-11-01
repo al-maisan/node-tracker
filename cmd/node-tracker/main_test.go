@@ -338,3 +338,37 @@ func TestOnceFailsWhileAlertsAreUndelivered(t *testing.T) {
 		t.Fatalf("code = %d, sent = %d after recovery", code, len(w.messages()))
 	}
 }
+
+func TestInstallServiceDryRun(t *testing.T) {
+	w := newWorld(t)
+	cfg, _ := w.config(t)
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	code, out, errs := exec(t, "install-service", "-user", "-dry-run", "-config", cfg)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, errs)
+	}
+	for _, s := range []string{
+		"would write " + filepath.Join(xdg, "systemd", "user", "node-tracker.service") + " (0644):\n",
+		" run -config " + cfg + "\n",
+		"password_env: the service does not get this shell's environment",
+		"would run: systemctl --user enable --now node-tracker.service\n",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("no %q in\n%s", s, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(xdg, "systemd")); err == nil {
+		t.Error("dry run wrote files")
+	}
+	for _, args := range [][]string{
+		{"install-service"},
+		{"install-service", "-user", "-system"},
+		{"install-service", "-user", "extra"},
+		{"install-service", "-user", "-dry-run", "-config", "/nonexistent.yaml"},
+	} {
+		if code, _, _ := exec(t, args...); code != exitUsage {
+			t.Errorf("%v: code = %d, want %d", args, code, exitUsage)
+		}
+	}
+}

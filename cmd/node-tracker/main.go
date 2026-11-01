@@ -24,6 +24,7 @@ import (
 	"github.com/al-maisan/node-tracker/internal/health"
 	"github.com/al-maisan/node-tracker/internal/monitor"
 	"github.com/al-maisan/node-tracker/internal/notify"
+	"github.com/al-maisan/node-tracker/internal/service"
 	"github.com/al-maisan/node-tracker/internal/state"
 )
 
@@ -46,12 +47,13 @@ const (
 const usage = `Usage: node-tracker <command> [flags]
 
 Commands:
-  run           run as a daemon, one tick every interval
-  once          run one tick and exit (for cron or a systemd timer)
-  check         dry run: sample all targets and print a table; no state, no alerts
-  report        send a status report of all targets to every notifier
-  test-notify   send a test message, to one notifier [name] or all
-  version       print version information
+  run              run as a daemon, one tick every interval
+  once             run one tick and exit (for cron or a systemd timer)
+  check            dry run: sample all targets and print a table; no state, no alerts
+  report           send a status report of all targets to every notifier
+  test-notify      send a test message, to one notifier [name] or all
+  install-service  write and enable the systemd unit (-user or -system)
+  version          print version information
 
 Run 'node-tracker <command> -h' for the command's flags.
 `
@@ -80,6 +82,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)
 		return exitOK
+	case "install-service":
+		return installService(ctx, args, stdout, stderr)
 	case "run", "once", "check", "report", "test-notify":
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
@@ -136,6 +140,45 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	default:
 		return tick(ctx, cmd, m, cfg, o, log)
 	}
+}
+
+func installService(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	var o service.Options
+	var user bool
+	fs := flag.NewFlagSet("install-service", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.BoolVar(&user, "user", false, "user service: ~/.config/systemd/user, no root needed")
+	fs.BoolVar(&o.System, "system", false, "system service: /etc/systemd/system, needs root")
+	fs.BoolVar(&o.Timer, "timer", false, "install node-tracker-once.timer instead of the daemon")
+	fs.BoolVar(&o.DryRun, "dry-run", false, "print the files and commands, change nothing")
+	fs.BoolVar(&o.Force, "force", false, "replace a changed unit or config, keeping a .bak")
+	fs.StringVar(&o.Config, "config", "", "-user: config for the unit (default $XDG_CONFIG_HOME/node-tracker/config.yaml); -system: config to install to /etc/node-tracker")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
+	}
+	if user == o.System || fs.NArg() > 0 {
+		fmt.Fprintln(stderr, "install-service: give one of -user or -system, and no arguments")
+		return exitUsage
+	}
+	if o.Config != "" {
+		abs, err := filepath.Abs(o.Config)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitUsage
+		}
+		o.Config = abs
+	}
+	if err := service.Install(ctx, service.NewHost(stdout, stderr), o); err != nil {
+		fmt.Fprintf(stderr, "node-tracker: install-service: %v\n", err)
+		if errors.As(err, new(service.UsageError)) {
+			return exitUsage
+		}
+		return exitFailure
+	}
+	return exitOK
 }
 
 // setup loads the config and builds the monitor. Config errors go to stderr
