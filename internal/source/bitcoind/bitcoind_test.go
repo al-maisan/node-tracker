@@ -1,10 +1,14 @@
 package bitcoind
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,5 +136,46 @@ func TestHiddenCookiePath(t *testing.T) {
 	_, err = New("n", srv.URL, Auth{CookieFile: cookie + ".x"}, httpx.NewClient()).Height(context.Background())
 	if err == nil || !strings.Contains(err.Error(), cookie+".x") || !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("shown: err = %v", err)
+	}
+}
+
+// A kept-alive connection that bitcoind closed while idle (its
+// rpcservertimeout) is retried on a new one, not reported as EOF.
+func TestStaleConnectionRetried(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	const resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
+	body := `{"result":{"blocks":100,"headers":100,"chain":"main"},"error":null}`
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				for i := 0; ; i++ {
+					req, err := http.ReadRequest(r)
+					if err != nil {
+						return
+					}
+					io.Copy(io.Discard, req.Body)
+					if i == 1 { // the second request on a connection: closed unanswered
+						return
+					}
+					fmt.Fprintf(c, resp, len(body), body)
+				}
+			}()
+		}
+	}()
+	c := New("n", "http://"+ln.Addr().String(), Auth{Username: "u", Password: "p"}, httpx.NewClient())
+	for i := range 3 {
+		if h, err := c.Height(context.Background()); err != nil || h.Blocks != 100 {
+			t.Fatalf("call %d: %+v, %v", i, h, err)
+		}
 	}
 }
