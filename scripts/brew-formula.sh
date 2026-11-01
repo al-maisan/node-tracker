@@ -66,6 +66,15 @@ $linux_amd64
     pkgshare.install "deploy", "examples"
   end
 
+  # brew services start node-tracker: launchd on macOS, a systemd user
+  # service on Linux. node-tracker logs to stderr.
+  service do
+    run [opt_bin/"node-tracker", "run"]
+    keep_alive true
+    log_path var/"log/node-tracker.log"
+    error_log_path var/"log/node-tracker.log"
+  end
+
   test do
     assert_match "node-tracker v#{version} (", shell_output("#{bin}/node-tracker version")
   end

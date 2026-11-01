@@ -88,6 +88,17 @@ The easiest way first:
   systemd units and example config in `$(brew --prefix)/share/node-tracker`,
   and `man node-tracker` works.
 
+  To run it in the background (launchd on macOS, a systemd user service on
+  Linux), put the config in `~/.config/node-tracker/config.yaml`, check it,
+  then start the service:
+
+  ```sh
+  node-tracker check && brew services start node-tracker
+  ```
+
+  It logs to `$(brew --prefix)/var/log/node-tracker.log`. On Linux, also
+  run `loginctl enable-linger` to keep it running after you log out.
+
 - **Release archive** (Linux amd64, arm64, armv7 for a 32-bit Raspberry Pi
   OS; macOS amd64, arm64): download the archive for your system from the
   [releases page](https://github.com/al-maisan/node-tracker/releases),
