@@ -266,7 +266,9 @@ internal/source/esplora/     Esplora REST
 internal/notify/             Message, Event, rendering, retry/backoff
 internal/notify/telegram/    Bot API
 internal/httpx/              hardened HTTP client, body limits, URL redaction
-examples/  deploy/systemd/{system,user}/  deploy/cron/  docs/
+internal/service/            install-service: render, write and enable the units
+deploy/                      the units (embedded by deploy.go, so install-service writes the shipped ones), cron example
+examples/  docs/
 ```
 
 Everything lives under `internal/`: the tool's code is not a public library
@@ -317,6 +319,10 @@ because a sensible value depends on the chain and on the user's tolerance.
     `SystemCallFilter=@system-service`, `MemoryDenyWriteExecute`, and more.
   - Only `getblockchaininfo` is called, and the docs show how to limit the
     RPC user to it with `rpcwhitelist`.
+  - `install-service` runs `systemctl`, `loginctl` and `useradd` directly,
+    without a shell. The unit gets only validated paths, and never a
+    secret. For `-system` only root may be able to change the binary and
+    the directories above it, since the service can read the secrets.
 - **State file** is created `0600` in a `0700` directory. It holds heights
   and states only, never secrets.
 
@@ -331,6 +337,7 @@ because a sensible value depends on the chain and on the user's tolerance.
 | `node-tracker check` | dry run: validate the config, sample every target, print a table. Does not touch state and sends no alerts |
 | `node-tracker report` | send a status report of every target to every notifier, whatever the state. Not queued: a report is worthless if late |
 | `node-tracker test-notify [name]` | send a test message through one notifier, or all of them. Useful during setup |
+| `node-tracker install-service -user\|-system` | write the shipped unit with `ExecStart=` set to the running binary and enable it; `-system` also creates the user and installs the config and secrets (see operations.md) |
 | `node-tracker version` | version, short git commit, build time (from `make build` ldflags; a plain `go install` falls back to the build info Go embeds), Go version |
 
 `check` prints a table like this:
