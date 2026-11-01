@@ -389,6 +389,7 @@ proxy, an onion service for the RPC port on the node, and an `rpcauth` user
            url: https://blockstream.info/api
        alert:
          threshold: 3
+         down_for: 10   # NODE_DOWN only after 10 ticks (5 min at 30s): Tor stalls at times
        notify: [telegram]
    ```
 
@@ -400,6 +401,13 @@ proxy, an onion service for the RPC port on the node, and an `rpcauth` user
 
 If Tor on the monitoring host stops, the node shows as `NODE_DOWN`: it
 can't be watched then, so that is the right alert.
+
+Onion connections stall now and then for a minute or two (a failed
+circuit, `general SOCKS server failure`), so the node can flap between
+`NODE_DOWN` and `OK`. `alert.down_for` waits longer before `NODE_DOWN`
+than `for` does before `LAGGING`; `node-tracker setup` sets it for `.onion`
+nodes to about 5 minutes. A node that answers but is behind still alerts
+after `for`.
 
 For Umbrel, StartOS, RaspiBlitz and myNode, see [Node boxes](node-boxes.md):
 it shows where each box keeps the RPC credentials and its onion address.

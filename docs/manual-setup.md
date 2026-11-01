@@ -54,8 +54,9 @@ cookie. For a node elsewhere add `-node-url`, and `-cookie-file`, or
 `-rpc-user` with `-rpc-password-file`; for Tor on another port than
 9050, `-proxy socks5://127.0.0.1:9150`. To reach Telegram through Tor,
 `-telegram-proxy socks5://127.0.0.1:9050`. `-references` (comma-separated
-Esplora API URLs, or `none`), `-preset fast|balanced|quiet` and `-name`
-are optional. A file that exists and differs is replaced only with
+Esplora API URLs, or `none`), `-preset fast|balanced|quiet`, `-name` and
+`-down-for` (checks before "node unreachable"; about 5 minutes for a
+`.onion` node unless set) are optional. A file that exists and differs is replaced only with
 `-force`, keeping the old config (not old secrets) as `.bak`. The node and references are tested and a test
 message is sent, but only a bot token that Telegram rejects stops it, as
 the node or the network may not be up yet. `node-tracker setup -h` lists

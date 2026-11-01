@@ -33,6 +33,7 @@ const (
 	DefaultTelegramAPI = "https://api.telegram.org"
 	DefaultTorProxy    = "socks5://127.0.0.1:9050" // proxy of .onion endpoints without one
 	DefaultTimeout     = 10 * time.Second          // per call, if the config sets no timeout
+	MaxFor             = 100                       // most ticks alert.for and alert.down_for may ask for
 )
 
 var (
@@ -49,7 +50,6 @@ const (
 	defaultRecover   = 1
 	defaultFor       = 2
 	defaultOutlier   = 6
-	maxFor           = 100
 	maxConfigSize    = 1 << 20
 	maxSecretSize    = 4 << 10
 )
@@ -406,14 +406,14 @@ func (a *Alert) validate(v *validator, p string) {
 	if a.For == 0 {
 		a.For = defaultFor
 	}
-	if a.For < 1 || a.For > maxFor {
-		v.errf(p+".for", "must be between 1 and %d", maxFor)
+	if a.For < 1 || a.For > MaxFor {
+		v.errf(p+".for", "must be between 1 and %d", MaxFor)
 	}
 	if a.DownFor == 0 {
 		a.DownFor = a.For
 	}
-	if a.DownFor < 1 || a.DownFor > maxFor {
-		v.errf(p+".down_for", "must be between 1 and %d", maxFor)
+	if a.DownFor < 1 || a.DownFor > MaxFor {
+		v.errf(p+".down_for", "must be between 1 and %d", MaxFor)
 	}
 }
 

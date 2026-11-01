@@ -31,6 +31,10 @@ targets:
       # username: tracker
       # password_file: /etc/node-tracker/rpc-password
       # password_env: NODE_TRACKER_RPC_PASSWORD
+      # A node reached over Tor: url: http://<address>.onion:8332 with
+      # username + password_file. It goes through the local Tor at
+      # socks5://127.0.0.1:9050 unless a proxy is set (docs/operations.md, Tor):
+      # proxy: socks5://127.0.0.1:9050
 
     # Independent views of the chain tip. Use at least two you trust.
     # Optional; default: these two on mainnet, mempool.space on test
@@ -56,3 +60,4 @@ notifiers:
     bot_token_file: ~/.config/node-tracker/telegram-token   # see docs/telegram.md
     # bot_token_env: NODE_TRACKER_TELEGRAM_TOKEN
     chat_id: "123456789"
+    # proxy: socks5://127.0.0.1:9050   # optional; e.g. Telegram through Tor

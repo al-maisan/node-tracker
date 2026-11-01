@@ -294,6 +294,9 @@ func TestSetupLocalNode(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("code = %d\n%s", code, errs)
 	}
+	if strings.Contains(out, "reached over Tor") {
+		t.Error("down_for explained for a local node")
+	}
 	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "node-tracker")
 	path, tok := filepath.Join(dir, "config.yaml"), filepath.Join(dir, "telegram-token")
 	for _, s := range []string{
@@ -397,6 +400,7 @@ func TestSetupOnionNode(t *testing.T) {
 		"Telegram refuses to hand out the bot's messages: the bot has a webhook",
 		"failed: HTTP 400: Bad Request: chat not found (wrong chat id, or the bot was never started in that chat)\n",
 		"backed up " + path + " to " + path + ".bak\n",
+		`"node unreachable" is sent only after 5 checks in a row (about 5m0s; alert.down_for)`,
 		"Start it later with: node-tracker install-service -user -config " + path,
 	} {
 		if !strings.Contains(out, s) {
@@ -557,7 +561,7 @@ func TestSetupNonInteractive(t *testing.T) {
 	os.WriteFile(pwSrc, []byte("s3cret\n"), 0o600)
 	os.WriteFile(tokSrc, []byte(tgToken+"\n"), 0o600)
 	args := []string{"setup", "-non-interactive", "-node-url", w.srv.URL + "/rpc", "-rpc-user", "tracker", "-rpc-password-file", pwSrc,
-		"-token-file", tokSrc, "-chat-id", "42", "-references", w.srv.URL + "/api", "-preset", "fast", "-name", "btc", "-install-service"}
+		"-token-file", tokSrc, "-chat-id", "42", "-references", w.srv.URL + "/api", "-preset", "fast", "-name", "btc", "-down-for", "7", "-install-service"}
 
 	var out bytes.Buffer
 	code, errs := runSetup(context.Background(), &out, args...)
@@ -581,7 +585,7 @@ func TestSetupNonInteractive(t *testing.T) {
 		t.Errorf("install-service %+v", *installs)
 	}
 	cfg, _, err := config.LoadEnv(path, detectEnv)
-	if err != nil || *cfg.Targets[0].Alert.Threshold != 2 || *cfg.Targets[0].Alert.RecoverThreshold != 0 || cfg.Targets[0].Node.Username != "tracker" {
+	if err != nil || *cfg.Targets[0].Alert.Threshold != 2 || *cfg.Targets[0].Alert.RecoverThreshold != 0 || cfg.Targets[0].Node.Username != "tracker" || cfg.Targets[0].Alert.DownFor != 7 {
 		t.Fatalf("config %+v, %v", cfg, err)
 	}
 
@@ -611,6 +615,8 @@ func TestSetupNonInteractive(t *testing.T) {
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-node-url", "http://127.0.0.1:1"}, "-node-url needs -cookie-file"},
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-node-url", "http://10.0.0.2:8332", "-cookie-file", "/c"}, "plain http is only allowed"},
 		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-preset", "slow"}, `-preset "slow"`},
+		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-down-for", "101"}, "-down-for 101: must be between 1 and 100"},
+		{[]string{"setup", "-non-interactive", "-token-file", tokSrc, "-chat-id", "42", "-down-for", "-1"}, "-down-for -1: must be between 1 and 100"},
 	} {
 		if code, errs := runSetup(context.Background(), io.Discard, tc.args...); code != exitUsage || !strings.Contains(errs, tc.want) {
 			t.Errorf("%v: code=%d, want %q in\n%s", tc.args, code, tc.want, errs)
@@ -777,6 +783,28 @@ func TestCookiePathErr(t *testing.T) {
 	} {
 		if err := (&wizard{root: tt.root}).cookiePathErr(tt.c); (err == nil) != tt.ok {
 			t.Errorf("root=%v %q: %v", tt.root, tt.c, err)
+		}
+	}
+}
+
+// down_for: -down-for wins for any node; else about 5 minutes for a .onion
+// node, else the preset's for (left out of the config).
+func TestNodeDownFor(t *testing.T) {
+	const onion = "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion:8332"
+	for _, tt := range []struct {
+		url             string
+		preset, downFor int
+		want            int
+	}{
+		{"http://127.0.0.1:8332", 1, 0, 2},
+		{onion, 1, 0, 10}, // balanced: 30s
+		{onion, 2, 0, 5},  // quiet: 60s
+		{onion, 1, 4, 4},  // -down-for
+		{"http://127.0.0.1:8332", 0, 7, 7},
+	} {
+		a := &answers{node: config.Endpoint{URL: tt.url}, preset: tt.preset, downFor: tt.downFor}
+		if got := a.nodeDownFor(); got != tt.want {
+			t.Errorf("%s preset %d -down-for %d: %d, want %d", tt.url, tt.preset, tt.downFor, got, tt.want)
 		}
 	}
 }

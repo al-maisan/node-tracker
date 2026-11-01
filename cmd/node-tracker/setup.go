@@ -111,6 +111,7 @@ type setupOptions struct {
 	config, name, nodeURL, cookieFile, rpcUser, rpcPasswordFile string
 	proxy, references, preset, tokenFile, chatID, telegramProxy string
 	nonInteractive, allowInsecure, installService, force        bool
+	downFor                                                     int // 0: see answers.downFor
 }
 
 func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -137,6 +138,7 @@ func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&o.preset, "preset", presets[defaultPreset].name, "alert preset: fast, balanced or quiet")
 	fs.StringVar(&o.tokenFile, "token-file", "", "file holding the Telegram bot token (required)")
 	fs.StringVar(&o.chatID, "chat-id", "", "Telegram chat id or @channel (required)")
+	fs.IntVar(&o.downFor, "down-for", 0, fmt.Sprintf("ticks a node must be unreachable before NODE_DOWN, 1-%d (default: as for the preset; for a .onion node about %s)", config.MaxFor, onionDownWait))
 	fs.StringVar(&o.telegramProxy, "telegram-proxy", "", "proxy for Telegram, e.g. "+config.DefaultTorProxy+" (default: from the environment)")
 	fs.BoolVar(&o.installService, "install-service", false, "then run install-service (-user, or -system as root)")
 	fs.BoolVar(&o.force, "force", false, "replace existing files, keeping the old config as .bak")
@@ -219,6 +221,7 @@ type answers struct {
 	chatID     string
 	chatTested bool   // the test message went through
 	tgProxy    string // of the notifier
+	downFor    int    // -down-for; 0: see nodeDownFor
 }
 
 func (w *wizard) run(ctx context.Context) (int, error) {
@@ -374,6 +377,10 @@ func (w *wizard) interview(ctx context.Context) (*answers, error) {
 	fmt.Fprintln(w.out, "\n3. Alerts")
 	if a.preset, err = w.askPreset(ctx); err != nil {
 		return nil, err
+	}
+	if n := a.nodeDownFor(); n != presets[a.preset].ticks {
+		fmt.Fprintf(w.out, "The node is reached over Tor, which stalls now and then: \"node unreachable\" is sent only after %d checks in a row (about %s; alert.down_for).\n",
+			n, time.Duration(n)*presets[a.preset].interval)
 	}
 
 	fmt.Fprintln(w.out, "\n4. Telegram")
@@ -911,6 +918,10 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 	if a.preset, ok = presetIndex(o.preset); !ok {
 		return nil, fmt.Errorf("-preset %q: must be fast, balanced or quiet", o.preset)
 	}
+	if o.downFor != 0 && (o.downFor < 1 || o.downFor > config.MaxFor) {
+		return nil, fmt.Errorf("-down-for %d: must be between 1 and %d", o.downFor, config.MaxFor)
+	}
+	a.downFor = o.downFor
 	if o.tokenFile == "" || o.chatID == "" {
 		return nil, errors.New("-non-interactive needs -token-file and -chat-id")
 	}
@@ -1153,14 +1164,28 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 	return w.offerService(ctx, path, root, files[len(files)-1].bak)
 }
 
+// nodeDownFor is the alert.down_for of a: -down-for if given, else about
+// onionDownWait for a .onion node (Tor stalls for minutes at times), else
+// the preset's for.
+func (a *answers) nodeDownFor() int {
+	p := presets[a.preset]
+	switch {
+	case a.downFor > 0:
+		return a.downFor
+	case explain.IsOnion(a.node.URL):
+		return max(p.ticks, int(onionDownWait/p.interval))
+	}
+	return p.ticks
+}
+
 // render is the config of a, with the bot token in tok and the RPC
 // password, if any, in pw.
 func (w *wizard) render(a *answers, tok, pw string) ([]byte, error) {
 	p := presets[a.preset]
 	t := config.Target{Name: a.name, Node: a.node, References: a.refs,
 		Alert: config.Alert{Threshold: &p.threshold, RecoverThreshold: &p.recover, For: p.ticks}}
-	if explain.IsOnion(a.node.URL) { // Tor stalls for minutes at times
-		t.Alert.DownFor = max(p.ticks, int(onionDownWait/p.interval))
+	if n := a.nodeDownFor(); n != p.ticks {
+		t.Alert.DownFor = n
 	}
 	if a.node.Username != "" {
 		t.Node.PasswordFile = pw
