@@ -65,7 +65,7 @@ and changes nothing.
 By hand, the same is:
 
 ```sh
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin node-tracker
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin node-tracker
 sudo install -d -m 750 -o root -g node-tracker /etc/node-tracker
 sudo install -m 640 -o root -g node-tracker examples/config.yaml /etc/node-tracker/config.yaml
 sudo install -m 640 -o root -g node-tracker /dev/null /etc/node-tracker/telegram-token   # then put the token in it
@@ -446,8 +446,13 @@ Network height: 974,085 (esplora:mempool.space)
 At: 2026-11-01 13:05:00 UTC
 ```
 
-Run it hourly or daily from a timer (`node-tracker-report.timer`) or from
-cron. A regular report also proves that the alert path works. A report does
+Run it hourly from the shipped timer, or from cron. The packages install
+`node-tracker-report.service` and `node-tracker-report.timer`; otherwise
+copy both from `deploy/systemd/system` (or `user`) next to the other
+units. Then `sudo systemctl enable --now node-tracker-report.timer`
+(`systemctl --user …` for the user units); `install-service` does not
+enable it. The system unit reads `/etc/node-tracker/config.yaml`. A
+regular report also proves that the alert path works. A report does
 not touch the state and is not queued: if it can't be delivered, the command
 exits with code 1. It shows each target as one sample sees it, against
 `threshold`, without the debouncing (`for`) or `recover_threshold` of the

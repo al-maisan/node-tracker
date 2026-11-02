@@ -90,7 +90,8 @@ and finds the cookie in the first of them that has a readable one:
 2. `~/.bitcoin`
 3. `~/Library/Application Support/Bitcoin` (macOS)
 4. `~/snap/bitcoin-core/common/.bitcoin`
-5. `/var/lib/bitcoind`, with its config in `/etc/bitcoin/bitcoin.conf`
+5. `/var/lib/bitcoind`, with its config in `/etc/bitcoin/bitcoin.conf` or
+   `/var/lib/bitcoind/bitcoin.conf`
 
 Without a home (`HOME` unset or `/`, as for the system service), 2–4 are
 skipped. `install-service -system` checks the config the same way, with
@@ -252,7 +253,7 @@ through a loopback proxy (Tor encrypts the traffic itself). Any other `http://` 
 example a LAN or a WireGuard tunnel. A `proxy` set on an `http://`
 endpoint must be loopback too, as it sees the traffic, unless
 `allow_insecure: true`. A notifier's `api_url` must use
-`https://` unless its host is loopback, `.onion` included.
+`https://` unless its host is loopback; a `.onion` host is no exception.
 
 ## `notifiers[]`
 

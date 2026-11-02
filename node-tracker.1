@@ -198,8 +198,9 @@ Proxy for the node, e.g.
 .BR socks5://127.0.0.1:9150 .
 Default: from the environment; for .onion,
 .BR socks5://127.0.0.1:9050 .
-It is written to the configuration unless it is that default, as the
-service may not have this shell's proxy variables.
+For a .onion node, a proxy from the environment other than that default
+is written to the configuration too, as the service may not have this
+shell's proxy variables.
 .TP
 .B \-allow\-insecure
 Allow plain http to a node that is neither loopback nor .onion, e.g. on a
@@ -351,6 +352,12 @@ See the configuration reference for per\-endpoint and per\-notifier proxies and 
 .TP
 .BR XDG_CONFIG_HOME ", " XDG_STATE_HOME
 Base directories of the default configuration and state files.
+.TP
+.B BITCOIN_DATADIR
+First datadir tried when a target's
+.B node
+is left out and the local bitcoind is detected; see the configuration
+reference.
 .SH FILES
 .TP
 .I ~/.config/node\-tracker/config.yaml

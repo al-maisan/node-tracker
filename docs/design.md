@@ -119,8 +119,9 @@ Rules:
 The logic lives in package `health`, as two pure functions with no I/O, so
 it is fully unit-testable:
 
-- `Observe(sample, rule, current) → observation` classifies one sample.
-  The current state is needed for hysteresis.
+- `Observe(sample, rule, lagging) → observation` classifies one sample.
+  `lagging`, the last OK/LAGGING verdict, selects the threshold
+  (hysteresis).
 - `Step(target, observed, rule, now) → (target, alert)` debounces.
 
 ## 4. Architecture
@@ -222,6 +223,7 @@ that they send identical alerts.
 type Height struct {
     Blocks  uint64 // fully validated blocks
     Headers uint64 // best known header; equal to Blocks if the source has no such notion
+    Chain   string // e.g. "main" or "signet", if the source reports it
 }
 
 type Source interface {
@@ -278,6 +280,7 @@ internal/source/esplora/     Esplora REST
 internal/notify/             Message, Event, rendering, retry/backoff
 internal/notify/telegram/    Bot API
 internal/httpx/              hardened HTTP client, body limits, URL redaction
+internal/explain/            plain-words causes of node, reference and Telegram errors (check, test-notify, setup, alerts)
 internal/service/            install-service: render, write and enable the units
 internal/fsx/                atomic file writes (install-service, setup)
 internal/term/               terminal echo off for secrets (termios ioctls, stdlib only)
@@ -480,4 +483,4 @@ formula is written by `make release`. Ubuntu: `ppa:al-maisan/node-tracker`,
 uploaded by `make ppa`. Fedora: COPR `al-maisan/node-tracker`, built by
 `make copr`. Container image: `ghcr.io/al-maisan/node-tracker`, built
 from the release archives by `make image` and pushed by `make release`.
-Other packaging (AUR) is tracked in issue #8.
+Other packaging (AUR) is tracked in issue #6.
