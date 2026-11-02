@@ -272,8 +272,11 @@ func TestSetupLocalNode(t *testing.T) {
 		turn{prompt: "References: Esplora API URLs separated by spaces, or none [https://mempool.space/api https://blockstream.info/api]: ", answer: w.srv.URL + "/api"},
 		turn{prompt: "Preset [2]: "},
 		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: "},
+		turn{prompt: "Do you already have a Telegram bot for the alerts? [y/N] "},
+		turn{prompt: "Bot token (input hidden): ", secret: true},
 		turn{prompt: "Bot token (input hidden): ", answer: "123:WRONG", secret: true},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
+		turn{prompt: "Choice [1]: "},
 		turn{prompt: "Install and start the systemd service now (node-tracker install-service -user)? [Y/n] "},
 	)
 	tg.updates = func(_ context.Context, offset int64) (int, string) {
@@ -306,7 +309,8 @@ func TestSetupLocalNode(t *testing.T) {
 	for _, s := range []string{
 		"Found bitcoind at http://127.0.0.1:",
 		": chain main, height 938,266, cookie " + cookie + "\n",
-		"telegram rejected the token; copy it again from @BotFather\n",
+		"telegram rejected the token; copy only the token (e.g. 123456789:AAH…) again from @BotFather\n",
+		"No token entered: paste it and press Enter; the input stays hidden.\n",
 		"Bot: @nt_test_bot (token …OKEN)\n",
 		"Found: you (@me?[2J), chat id 42\n",
 		"Sending a test message … sent.",
@@ -375,9 +379,13 @@ func TestSetupOnionNode(t *testing.T) {
 		turn{prompt: "Preset [2]: ", answer: "quiet"},
 		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "my tracker"},
 		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "shb"},
+		turn{prompt: "Do you already have a Telegram bot for the alerts? [y/N] "},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
-		turn{prompt: "Chat id or @channel: ", answer: "666"},
-		turn{prompt: "Chat id or @channel: ", answer: "@mychannel"},
+		turn{prompt: "Choice [1]: "},
+		turn{prompt: "Choice [1]: ", answer: "4"},
+		turn{prompt: "Chat id (Enter: back): ", answer: "666"},
+		turn{prompt: "Choice [1]: ", answer: "3"},
+		turn{prompt: "Channel's @name (Enter: back): ", answer: "@mychannel"},
 		turn{prompt: "Replace them (the old config is kept as .bak, old secrets are not)? [y/N] ", answer: "y"},
 		turn{prompt: "Install and start the systemd service now (node-tracker install-service -user -config ", answer: "n"},
 	)
@@ -404,6 +412,7 @@ func TestSetupOnionNode(t *testing.T) {
 		"Tor does not answer at socks5://127.0.0.1:1: dial tcp 127.0.0.1:1: connect: connection refused. Install and start Tor",
 		"Testing the node … ok: chain main, height 938,266\n",
 		"Telegram refuses to hand out the bot's messages: the bot has a webhook",
+		"The Telegram settings of " + path + " can't be kept: ",
 		"failed: HTTP 400: Bad Request: chat not found (wrong chat id, or the bot was never started in that chat)\n",
 		"backed up " + path + " to " + path + ".bak\n",
 		`"node unreachable" is sent only after 5 checks in a row (about 5m0s; alert.down_for)`,
@@ -450,6 +459,7 @@ func TestSetupExistingUserTelegramDown(t *testing.T) {
 		turn{prompt: "References", answer: "none"},
 		turn{prompt: "Preset [2]: "},
 		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "none"},
+		turn{prompt: "Do you already have a Telegram bot for the alerts? [y/N] "},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: "},
 		turn{prompt: "[r]etry, [k]eep the token untested, or [t]ry through Tor (socks5://127.0.0.1:1)? [r]: ", answer: "t"},
@@ -522,9 +532,11 @@ func TestSetupRemoteNodeTelegramTor(t *testing.T) {
 		turn{prompt: "References", answer: "none"},
 		turn{prompt: "Preset [2]: "},
 		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "none"},
+		turn{prompt: "Do you already have a Telegram bot for the alerts? [y/N] "},
 		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
 		turn{prompt: "or [t]ry through Tor (" + tor + ")? [r]: ", answer: "t"},
-		turn{prompt: "press Enter)\n", answer: "42"},
+		turn{prompt: "Choice [1]: ", answer: "4"},
+		turn{prompt: "Chat id (Enter: back): ", answer: "42"},
 		turn{prompt: "Install and start the systemd service now", answer: "n"},
 	)
 	h, _ := fakeSetup(t, tg, ft)
@@ -697,6 +709,7 @@ func TestSetupInterrupted(t *testing.T) {
 		turn{prompt: "References", answer: "none"},
 		turn{prompt: "Preset [2]: "},
 		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: ", answer: "none"},
+		turn{prompt: "Do you already have a Telegram bot for the alerts? [y/N] "},
 		turn{prompt: "Bot token (input hidden): ", do: cancel},
 	)
 	fakeSetup(t, newFakeTG(t), ft)
@@ -710,21 +723,84 @@ func TestSetupInterrupted(t *testing.T) {
 	}
 }
 
-// A chat id typed while waiting for the /start stops the wait.
-func TestAskChatTyped(t *testing.T) {
+// Typing while waiting does not stop the wait; the typed menu choices
+// refuse the bot itself, go back on Enter and check the id.
+func TestAskChat(t *testing.T) {
 	tg := newFakeTG(t)
+	var ft *fakeTerm
 	tg.updates = func(ctx context.Context, _ int64) (int, string) {
-		<-ctx.Done() // a long poll that sees nothing
-		return 200, `{"ok":true,"result":[]}`
+		if !strings.Contains(ft.transcript(), "Still waiting") {
+			select { // a long poll that sees nothing
+			case <-ctx.Done():
+			case <-time.After(50 * time.Millisecond):
+			}
+			return 200, `{"ok":true,"result":[]}`
+		}
+		m := regexp.MustCompile(`\?startgroup=([A-Za-z0-9_-]{22})\n`).FindStringSubmatch(ft.transcript())
+		return 200, `{"ok":true,"result":[{"update_id":1,"message":{"text":"/start@nt_test_bot ` + m[1] + `","chat":{"id":-100,"type":"group","title":"ops"}}}]}`
 	}
-	ft := newFakeTerm(t, turn{prompt: "press Enter)\n", answer: "x"}, turn{prompt: "Chat id or @channel: ", answer: "-100123"})
+	ft = newFakeTerm(t,
+		turn{prompt: "Choice [1]: ", answer: "116947131"},
+		turn{prompt: "Choice [1]: ", answer: "4"},
+		turn{prompt: "Chat id (Enter: back): ", answer: "@NT_Test_Bot"},
+		turn{prompt: "Chat id (Enter: back): ", answer: "x"},
+		turn{prompt: "Chat id (Enter: back): "},
+		turn{prompt: "Choice [1]: ", answer: "2"},
+		turn{prompt: "there is nothing to type here (Ctrl-C aborts) …\n", answer: "@nt_test_bot"},
+	)
 	h, _ := fakeSetup(t, tg, ft)
 	w := &wizard{setupHost: *h, out: ft, hc: httpx.NewClient(), done: make(chan struct{})}
 	defer close(w.done)
 	id, err := w.askChat(context.Background(), tgToken, "nt_test_bot")
 	ft.done()
-	if id != "-100123" || err != nil || !strings.Contains(ft.transcript(), "The chat id must be a numeric chat id or @channelname\n") {
-		t.Fatalf("askChat = %q, %v\n%s", id, err, ft.transcript())
+	out := ft.transcript()
+	for _, s := range []string{
+		"@nt_test_bot is the bot itself, it can't send to itself. For a chat with you, go back (Enter) and pick 1.\n",
+		"The chat id must be a numeric chat id or @channelname\n",
+		"If nothing happens (e.g. the bot is in the group already), send this message in the group:\n  /start@nt_test_bot ",
+		"Still waiting: open the link above in Telegram, or send the message above.",
+		"Found: group \"ops\", chat id -100\n",
+		"Pick 1, 2, 3 or 4.\n",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("no %q in\n%s", s, out)
+		}
+	}
+	if id != "-100" || err != nil {
+		t.Fatalf("askChat = %q, %v\n%s", id, err, out)
+	}
+}
+
+// A rerun keeps the bot and chat of the config, with its api_url and proxy;
+// if the test message fails, the token stays and only the chat is asked.
+func TestKeepTelegram(t *testing.T) {
+	for _, chat := range []string{"42", "666"} {
+		tg := newFakeTG(t)
+		proxy := "socks5://" + newSOCKS5(t, tg.srv.Listener.Addr().String()).addr
+		dir := t.TempDir()
+		path, tok := filepath.Join(dir, "config.yaml"), filepath.Join(dir, "telegram-token")
+		os.WriteFile(tok, []byte(tgToken+"\n"), 0o600)
+		os.WriteFile(path, []byte("targets:\n  - name: btc\n    references: []\nnotifiers:\n  - name: telegram\n    kind: telegram\n"+
+			"    bot_token_file: "+tok+"\n    chat_id: \""+chat+"\"\n    api_url: "+tg.srv.URL+"\n    proxy: "+proxy+"\n"), 0o600)
+		script := []turn{{prompt: "Keep the Telegram bot and chat of " + path + " (chat " + chat + ", token …OKEN)? [Y/n] "}}
+		if chat == "666" {
+			script = append(script, turn{prompt: "Choice [1]: ", answer: "4"}, turn{prompt: "Chat id (Enter: back): ", answer: "43"})
+		}
+		ft := newFakeTerm(t, script...)
+		h, _ := fakeSetup(t, tg, ft)
+		h.telegramAPI = "http://127.0.0.1:1" // the config's api_url is used
+		w := &wizard{setupHost: *h, out: ft, hc: httpx.NewClient(), done: make(chan struct{})}
+		a := &answers{}
+		err := w.askTelegram(context.Background(), a, path)
+		close(w.done)
+		ft.done()
+		want := map[string]string{"42": "42", "666": "43"}[chat]
+		if err != nil || a.token != tgToken || a.chatID != want || !a.chatTested || a.tgProxy != proxy || w.telegramAPI != tg.srv.URL {
+			t.Errorf("chat %s: err %v, answers %+v, api %s\n%s", chat, err, a, w.telegramAPI, ft.transcript())
+		}
+		if strings.Contains(ft.transcript(), "Bot token") || strings.Contains(ft.transcript(), "Do you already have a Telegram bot") {
+			t.Errorf("chat %s: token asked again\n%s", chat, ft.transcript())
+		}
 	}
 }
 

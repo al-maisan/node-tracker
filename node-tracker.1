@@ -160,9 +160,12 @@ If not, it can generate the RPC password and print the
 line for the node's
 .IR bitcoin.conf ;
 for a node elsewhere that defaults to no.
-The chat id is found from a
+A rerun offers to keep the bot and chat of the existing configuration.
+The alerts go to the user or a group, whose chat id is found from a
 .B /start
-link with a one\-time code that the user opens in Telegram.
+link with a one\-time code that the user opens in Telegram (or from
+.B /start
+and the code, sent to the bot), or to a channel or a known chat id, typed.
 If Telegram does not answer, it offers to retry, to keep the token
 untested and type the chat id, or to try through Tor
 .RB ( socks5://127.0.0.1:9050 ),
