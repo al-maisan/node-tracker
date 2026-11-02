@@ -413,9 +413,14 @@ func (in *installer) checkCookies(cfg *config.Config) error {
 		if err := hidden(real); err != nil {
 			return err
 		}
-		if err := readableBy(e.CookieFile, uid, gids); err != nil {
-			return usagef("%s: cookie_file: user %s can't read it: %v. Give it the group that owns the cookie: SupplementaryGroups=<group> in %s/%s.d/groups.conf (under [Service]), or usermod -aG <group> %s; on Bitcoin Core 28+ also set rpccookieperms=group. Then rerun", e.Name, Account, err, in.h.SystemUnitDir, svc, Account)
+		bs, gid, err := blockers(e.CookieFile, uid, gids)
+		if err != nil {
+			return err
 		}
+		if len(bs) == 0 {
+			continue
+		}
+		return cookieError(e.CookieFile, uid, gids, gid)
 	}
 	return nil
 }
@@ -445,21 +450,35 @@ func dropInGroups(dir string) ([]string, error) {
 	return groups, nil
 }
 
-// readableBy reports the first part of path that uid with gids can't get
-// through: a directory without x or the file without r for them.
-func readableBy(path string, uid int, gids []int) error {
+// blocker is a part of a path that keeps a user out: a directory without
+// x or the file without r for them.
+type blocker struct {
+	path     string
+	uid, gid int
+	perm     fs.FileMode
+	dir      bool
+}
+
+// blockers lists every part of path, where its symlinks lead, that uid with
+// gids can't get through, and returns the file's group.
+func blockers(path string, uid int, gids []int) ([]blocker, int, error) {
 	p, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
+	var bs []blocker
+	gid := -1
 	for q, need := p, fs.FileMode(4); ; q, need = filepath.Dir(q), 1 {
 		fi, err := os.Stat(q)
 		if err != nil {
-			return err
+			return nil, 0, err
 		}
 		st, ok := fi.Sys().(*syscall.Stat_t)
 		if !ok {
-			return fmt.Errorf("%s: no owner information", q)
+			return nil, 0, fmt.Errorf("%s: no owner information", q)
+		}
+		if gid == -1 {
+			gid = int(st.Gid)
 		}
 		perm := fi.Mode().Perm()
 		bits := perm & 7
@@ -470,12 +489,85 @@ func readableBy(path string, uid int, gids []int) error {
 			bits = perm >> 3 & 7
 		}
 		if bits&need == 0 {
-			return fmt.Errorf("%s is %d:%d mode %04o", q, st.Uid, st.Gid, perm)
+			bs = append(bs, blocker{q, int(st.Uid), int(st.Gid), perm, q != p})
 		}
 		if q == "/" {
-			return nil
+			return bs, gid, nil
 		}
 	}
+}
+
+// cookieError tells in plain words why the service account (uid, gids)
+// can't read the cookie at path, whose group is gid, and how to fix it as
+// commands: join that group, then open each path that still blocks. bitcoind
+// rewrites the cookie on start, so its mode comes from rpccookieperms.
+func cookieError(path string, uid int, gids []int, gid int) error {
+	g, in := groupName(gid), slices.Contains(gids, gid)
+	joined := append(slices.Clone(gids), gid)
+	bs, _, err := blockers(path, uid, joined)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "the service can't read bitcoind's cookie %s.\n", path)
+	switch {
+	case in:
+		fmt.Fprintf(&b, "It runs as user %s, which is in the cookie's group %s, but:\n", Account, g)
+	case len(bs) > 0:
+		fmt.Fprintf(&b, "It runs as user %s, which is not in the cookie's group %s, and:\n", Account, g)
+	default:
+		fmt.Fprintf(&b, "It runs as user %s, which is not in the cookie's group %s.\n", Account, g)
+	}
+	var fixes []string
+	if !in {
+		fixes = append(fixes, "sudo usermod -aG "+g+" "+Account)
+	}
+	w := 0
+	for _, x := range bs {
+		w = max(w, len(x.path))
+	}
+	for _, x := range bs {
+		why, fix := "its group can't read it", "add rpccookieperms=group to bitcoin.conf (Bitcoin Core 28 or newer), then restart bitcoind"
+		if x.dir {
+			why, fix = dirFix(x, uid, joined)
+		}
+		fmt.Fprintf(&b, "  %-*s  owner %s, group %s, mode %04o: %s\n", w, x.path, userName(x.uid), groupName(x.gid), x.perm, why)
+		fixes = append(fixes, fix)
+	}
+	b.WriteString("To fix it:")
+	for i, f := range fixes {
+		fmt.Fprintf(&b, "\n  %d. %s", i+1, f)
+	}
+	return usagef("%s", b.String())
+}
+
+// dirFix is why the directory x blocks uid with gids, and the chmod that
+// opens it: by the same bits as blockers, the owner's, the group's or the
+// others'.
+func dirFix(x blocker, uid int, gids []int) (why, fix string) {
+	switch {
+	case x.uid == uid:
+		return "its owner can't open it", "sudo chmod u+x " + x.path
+	case slices.Contains(gids, x.gid):
+		return "its group can't open it", "sudo chmod g+x " + x.path
+	}
+	return "others can't open it", "sudo chmod o+x " + x.path
+}
+
+// userName is uid's name, else the number.
+func userName(uid int) string {
+	if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+		return u.Username
+	}
+	return strconv.Itoa(uid)
+}
+
+// groupName is gid's name, else the number.
+func groupName(gid int) string {
+	if g, err := user.LookupGroupId(strconv.Itoa(gid)); err == nil {
+		return g.Name
+	}
+	return strconv.Itoa(gid)
 }
 
 // packaged returns the unit files to write. If the package's units (deb,
