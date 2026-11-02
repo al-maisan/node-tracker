@@ -62,6 +62,10 @@ details of each way: [docs/install.md](docs/install.md).
    node-tracker setup          # or: sudo node-tracker setup, for the system service
    ```
 
+   Run it as the user bitcoind runs as; `sudo` only if bitcoind is a
+   system service too, see
+   [System or user service](docs/operations.md#system-or-user-service).
+
    It finds your local bitcoind or asks for your node (`.onion` included),
    takes the token of a Telegram bot you create with @BotFather, and finds
    your chat when you tap a link. Every answer is tested, including a test

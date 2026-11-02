@@ -17,11 +17,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -77,6 +80,7 @@ type setupHost struct {
 	group       func() (gid int, err error) // of service.Account
 	install     func(ctx context.Context, out io.Writer, o service.Options) error
 	hostname    func() (string, error)
+	userNodes   func() []userNode // bitcoinds run by users, see userNodes
 	telegramAPI string
 	torProxy    string        // offered when Telegram does not answer
 	poll        time.Duration // one getUpdates long poll
@@ -98,6 +102,7 @@ var newSetupHost = func() setupHost {
 			return service.Install(ctx, service.NewHost(out, out), o)
 		},
 		hostname:    os.Hostname,
+		userNodes:   func() []userNode { return userNodes("/proc", user.LookupId) },
 		telegramAPI: config.DefaultTelegramAPI,
 		torProxy:    config.DefaultTorProxy,
 		poll:        30 * time.Second,
@@ -418,6 +423,7 @@ func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local b
 		}
 	} else {
 		fmt.Fprintf(w.out, "No local bitcoind answered at %s with the cookie %s: %s\n", d.URL, d.CookieFile, explain.Node(ce, app.Proxy(ce) != "none", err))
+		w.userNodeHint(d.CookieFile)
 	}
 	for {
 		var pw config.Secret
@@ -981,6 +987,9 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 	switch {
 	case err != nil:
 		fmt.Fprintf(w.out, "warning: the node did not answer: %s\n", explain.Node(ce, app.Proxy(ce) != "none", err))
+		if o.nodeURL == "" && o.cookieFile == "" && o.rpcUser == "" {
+			w.userNodeHint(d.CookieFile)
+		}
 	default:
 		fmt.Fprintf(w.out, "node %s: %s\n", a.node.URL, heightInfo(h))
 	}
@@ -1340,6 +1349,86 @@ func (w *wizard) detect() config.Detected {
 		env.Home, env.Getenv = "", nil
 	}
 	return env.Detect()
+}
+
+// userNodeHint tells root of a bitcoind run by a user, other than the one
+// at the cookie tried: the system service can't read a cookie in that
+// user's home (ProtectHome=yes), a service of that user's own can.
+func (w *wizard) userNodeHint(tried string) {
+	if !w.root {
+		return
+	}
+	for _, n := range w.userNodes() {
+		switch {
+		case n.cookie == tried:
+		case n.inHome:
+			fmt.Fprintf(w.out, "bitcoind runs as %[1]s, with the cookie in %[1]s's home (%[2]s), which the system service can't read. "+
+				"Run 'node-tracker setup' as %[1]s instead, without sudo: that sets up a service of %[1]s's own, which finds the cookie itself.\n", n.user, n.cookie)
+		default:
+			fmt.Fprintf(w.out, "bitcoind runs as %s, with the cookie %s: give that as the cookie file. The system service runs as %s, which must be able to read it.\n", n.user, n.cookie, service.Account)
+		}
+	}
+}
+
+// userNode is a bitcoind run by a user other than root, and its cookie.
+type userNode struct {
+	user, cookie string
+	inHome       bool // the cookie is in the user's home
+}
+
+// userNodes finds them in proc (Linux's /proc): the processes named
+// bitcoind or bitcoin-qt, their real uid, and the cookie that detection
+// finds from their arguments and the user's home. lookup gives a uid's
+// user. The arguments are not shown: they may hold -rpcpassword.
+func userNodes(proc string, lookup func(uid string) (*user.User, error)) []userNode {
+	ds, _ := os.ReadDir(proc)
+	var ns []userNode
+	for _, d := range ds {
+		if _, err := strconv.Atoi(d.Name()); err != nil {
+			continue
+		}
+		read := func(f string) string {
+			b, _ := os.ReadFile(filepath.Join(proc, d.Name(), f))
+			return string(b)
+		}
+		if c := strings.TrimSpace(read("comm")); c != "bitcoind" && c != "bitcoin-qt" {
+			continue
+		}
+		var uid string
+		for _, l := range strings.Split(read("status"), "\n") {
+			if f := strings.Fields(l); len(f) > 1 && f[0] == "Uid:" {
+				uid = f[1]
+			}
+		}
+		if uid == "" || uid == "0" {
+			continue
+		}
+		u, err := lookup(uid)
+		if err != nil {
+			continue
+		}
+		// A service account's home may be "/": then only the arguments count.
+		home := u.HomeDir
+		if !filepath.IsAbs(home) || filepath.Clean(home) == "/" {
+			home = ""
+		}
+		var args []string
+		if f := strings.Split(strings.TrimRight(read("cmdline"), "\x00"), "\x00"); len(f) > 1 {
+			args = f[1:]
+		}
+		cookie := config.Env{Root: "/", Home: home, GOOS: runtime.GOOS, Args: args}.Detect().CookieFile
+		n := userNode{u.Username, cookie, home != "" && strings.HasPrefix(cookie, filepath.Clean(home)+string(filepath.Separator))}
+		// Any process can be named bitcoind: only a regular file of its
+		// owner is a cookie, not e.g. -rpccookiefile=/etc/shadow.
+		fi, err := os.Stat(cookie)
+		if err != nil || !fi.Mode().IsRegular() || slices.Contains(ns, n) {
+			continue
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && strconv.FormatUint(uint64(st.Uid), 10) == uid {
+			ns = append(ns, n)
+		}
+	}
+	return ns
 }
 
 // cookiePathErr is why c can't be the cookie_file: as root it must be

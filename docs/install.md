@@ -1,7 +1,9 @@
 # Installing node-tracker
 
 The easiest way first. Then run `node-tracker setup`, see the
-[Quick start](../README.md#quick-start).
+[Quick start](../README.md#quick-start): as yourself if bitcoind runs as
+you, with `sudo` if it is a system service
+([System or user service](operations.md#system-or-user-service)).
 
 ## Ubuntu 26.04: PPA
 
