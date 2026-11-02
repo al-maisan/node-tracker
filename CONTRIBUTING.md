@@ -35,9 +35,12 @@ A new command or flag also goes into the man page, `node-tracker.1`;
 
 ## Releasing
 
-1. On an up-to-date `main`, tag the release commit with a signed tag and
+1. Set the version of the download examples in the docs (README,
+   `docs/install.md`): `make doc-version V=1.2.3`, then merge that change.
+   `make release` refuses a stable tag whose docs show another version.
+2. On an up-to-date `main`, tag the release commit with a signed tag and
    push it: `git tag -s v1.2.3 -m v1.2.3 && git push origin v1.2.3`
-2. Run `make release`. It stops unless the tree is clean, HEAD is on
+3. Run `make release`. It stops unless the tree is clean, HEAD is on
    `main` of `origin`, and the one `v*` tag at HEAD is signed by the
    release key (`RELEASE_KEY`) and is the same tag object on GitHub. Then
    it runs `lint`, `test` and `vuln`, builds `dist/`, signs `SHA256SUMS`
@@ -45,7 +48,7 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    stable release also gets `.deb` packages for amd64, arm64 and armhf
    (`scripts/deb.sh`), so the release machine needs `dpkg-deb` (Fedora:
    `sudo dnf install dpkg`).
-3. For a stable release (no `-PRE`), `make release` also writes the
+4. For a stable release (no `-PRE`), `make release` also writes the
    Homebrew formula `dist/node-tracker.rb` (`scripts/brew-formula.sh`) and
    prints a one-liner that commits it to `Formula/node-tracker.rb` in
    `al-maisan/homebrew-tap`. Check the formula, then run the one-liner.
@@ -66,7 +69,7 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    the cause and run `git checkout vX.Y.Z && make push-image TAG=vX.Y.Z`;
    it can be rerun at any time. After the first push, make the package
    public in its settings on GitHub, once.
-4. Run `make ppa` to upload the tag to `ppa:al-maisan/node-tracker`. It
+5. Run `make ppa` to upload the tag to `ppa:al-maisan/node-tracker`. It
    builds the source package of the newest stable tag at or below HEAD
    (`TAG`) with the vendored modules, so Launchpad builds it offline, and
    signs it with the release key (two key touches per Ubuntu release).
@@ -79,7 +82,7 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    of the PPA package's maintainer scripts (`scripts/deb/`); `make
    test-ppa` fails when a unit change needs a fresh copy. It needs `go`,
    `curl`, `python3`, `debuild` and `dput`.
-5. Run `make copr` to build the tag in COPR `al-maisan/node-tracker`. It
+6. Run `make copr` to build the tag in COPR `al-maisan/node-tracker`. It
    builds for every Fedora that is released (fedoraproject.org) and still
    maintained (Bodhi), on x86_64 and aarch64, and enables new chroots in
    the project. Chroots that already have the version are skipped;

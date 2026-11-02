@@ -32,11 +32,11 @@ example config are in `/usr/share/doc/node-tracker`; for the service, see
 amd64, arm64, armhf; from v1.1.0 on. Download the `.deb` for your system
 from the [releases page](https://github.com/al-maisan/node-tracker/releases)
 together with `SHA256SUMS` and `SHA256SUMS.asc` into one directory,
-[verify it](#verify-a-download), then install it (example: v1.2.0 on a
+[verify it](#verify-a-download), then install it (example: v1.3.2 on a
 64-bit Raspberry Pi OS):
 
 ```sh
-sudo apt install ./node-tracker_1.2.0-1_arm64.deb
+sudo apt install ./node-tracker_1.3.2-1_arm64.deb
 ```
 
 A note that the download "is performed unsandboxed as root" is harmless:
@@ -78,11 +78,11 @@ v1.0.0); macOS amd64, arm64. Download the archive for your system from the
 [releases page](https://github.com/al-maisan/node-tracker/releases)
 together with `SHA256SUMS` and `SHA256SUMS.asc` into one directory,
 [verify it](#verify-a-download), then unpack it and put the binary on your
-`PATH` (example: v1.2.0 on Linux amd64). `/usr/local/bin` also suits the
+`PATH` (example: v1.3.2 on Linux amd64). `/usr/local/bin` also suits the
 system service, which needs a root-owned path:
 
 ```sh
-tar -xzf node-tracker_1.2.0_linux_amd64.tar.gz && sudo install -m 755 node-tracker_1.2.0_linux_amd64/node-tracker /usr/local/bin/
+tar -xzf node-tracker_1.3.2_linux_amd64.tar.gz && sudo install -m 755 node-tracker_1.3.2_linux_amd64/node-tracker /usr/local/bin/
 ```
 
 The archive holds the binary, its man page (`node-tracker.1`), the README,
@@ -138,7 +138,7 @@ In the directory with the download, `SHA256SUMS` and `SHA256SUMS.asc`:
    ```
 
    You should see your file's name followed by `OK`, e.g.
-   `node-tracker_1.2.0-1_arm64.deb: OK`. On macOS use
+   `node-tracker_1.3.2-1_arm64.deb: OK`. On macOS use
    `shasum -a 256 --ignore-missing -c SHA256SUMS`.
 
 For a script, this checks the same and fails unless the release key

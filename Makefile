@@ -6,7 +6,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.
 TAG        ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null)
 RPM_DIR    := $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/node-tracker/rpmbuild
 
-.PHONY: build dist image push-image test-image release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
+.PHONY: build dist image push-image test-image doc-version release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/node-tracker ./cmd/node-tracker
@@ -29,6 +29,11 @@ push-image:
 # or docker. Needs network for the CA bundle unless it is cached.
 test-image:
 	scripts/image_test.sh
+
+# Sets the version of the download examples in the docs: make doc-version
+# V=1.2.3, before tagging v1.2.3. 'make release' refuses stale ones.
+doc-version:
+	scripts/doc-version.sh set '$(V)'
 
 # Needs a signed tag at HEAD, pushed to origin; signs SHA256SUMS with gpg.
 release:
@@ -65,6 +70,7 @@ test-ppa:
 	scripts/install-units_test.sh
 	scripts/deb_test.sh
 	scripts/push-image_test.sh
+	scripts/doc-version_test.sh
 
 test-copr:
 	scripts/copr-build_test.sh

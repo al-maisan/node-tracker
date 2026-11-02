@@ -27,6 +27,8 @@ mapfile -t tags < <(git tag --points-at HEAD 'v*')
 tag=${tags[0]}
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "tag '$tag' is not vMAJOR.MINOR.PATCH[-PRE]"
 tag_signed "$tag" . || die "tag '$tag' is not signed by $release_key"
+# The packages ship the docs: their download examples must show this version.
+if [[ $tag != *-* ]]; then scripts/doc-version.sh check "${tag#v}" || die "docs not at $tag"; fi
 
 # The remote tag must be this very tag object, not just point to HEAD.
 refs=$(git ls-remote "$remote" "refs/tags/$tag" "refs/tags/$tag^{}")
