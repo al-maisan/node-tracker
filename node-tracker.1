@@ -145,8 +145,8 @@ As root, it looks for bitcoind only in
 and
 .IR /etc/bitcoin ;
 if none answers there, it points at the bitcoind of another user, found from
-its process: run setup as that user, without sudo, if the cookie is in that
-user's home.
+its process, and offers to stop, so that setup runs as that user, without
+sudo.
 A file that exists and differs is replaced only after a confirmation (or
 with
 .BR \-force ),

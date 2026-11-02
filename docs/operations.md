@@ -35,9 +35,12 @@ As root, setup looks for bitcoind only in `/var/lib/bitcoind` and
 `/etc/bitcoin`. If none answers there, it looks at the bitcoind processes
 of other users and finds each one's cookie as bitcoind does (its
 `-datadir`, `-conf`, chain options and `-rpccookiefile`, else the user's
-`~/.bitcoin`). A cookie in that user's home: setup tells you to run it as
-that user. A cookie elsewhere (e.g. `-datadir=/mnt/ssd/bitcoin`): setup
-shows the path to give; the `node-tracker` user must be able to read it.
+`~/.bitcoin`). It shows each one's user and cookie, suggests running
+setup as that user, without `sudo`, and offers to stop (nothing is
+written). If you go on, for a cookie in that user's home setup says that
+the system service can't read it; one elsewhere (e.g.
+`-datadir=/mnt/ssd/bitcoin`) is the default, with that node's RPC URL;
+the `node-tracker` user must be able to read it.
 
 ## systemd system service
 
