@@ -111,6 +111,82 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+// A running bitcoind's arguments win over bitcoin.conf, as in Core.
+func TestDetectArgs(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads unreadable files")
+	}
+	const cookie = "__cookie__:x"
+	tests := []struct {
+		name  string
+		args  []string
+		files map[string]string
+		want  Detected // paths: "~/" for home (/home/u), "/" for root
+	}{
+		{"-conf in the home, as on orendil", []string{"-conf=/home/u/.bitcoin/bitcoin.conf"},
+			map[string]string{"~/.bitcoin/bitcoin.conf": "server=1\n", "~/.bitcoin/.cookie": cookie, "/var/lib/bitcoind/.cookie": cookie},
+			Detected{"~/.bitcoin/bitcoin.conf", ChainMain, "http://127.0.0.1:8332", "~/.bitcoin/.cookie"}},
+		{"-conf elsewhere, datadir in it", []string{"-conf=/opt/btc/bitcoin.conf"},
+			map[string]string{"/opt/btc/bitcoin.conf": "datadir=/data/btc\n", "/data/btc/.cookie": cookie, "~/.bitcoin/.cookie": cookie},
+			Detected{"/opt/btc/bitcoin.conf", ChainMain, "http://127.0.0.1:8332", "/data/btc/.cookie"}},
+		{"-datadir, its bitcoin.conf", []string{"-datadir=/mnt/ssd/bitcoin"},
+			map[string]string{"/mnt/ssd/bitcoin/bitcoin.conf": "signet=1\n", "/mnt/ssd/bitcoin/signet/.cookie": cookie, "~/.bitcoin/bitcoin.conf": "regtest=1\n"},
+			Detected{"/mnt/ssd/bitcoin/bitcoin.conf", ChainSignet, "http://127.0.0.1:38332", "/mnt/ssd/bitcoin/signet/.cookie"}},
+		{"-datadir wins over the conf's datadir", []string{"--datadir=/a", "-conf=/etc/x.conf"},
+			map[string]string{"/etc/x.conf": "datadir=/b\n", "/a/.cookie": cookie, "/b/.cookie": cookie},
+			Detected{"/etc/x.conf", ChainMain, "http://127.0.0.1:8332", "/a/.cookie"}},
+		{"relative -conf is in -datadir", []string{"-datadir=/d", "-conf=my.conf"},
+			map[string]string{"/d/my.conf": "chain=testnet4\n", "/d/testnet4/.cookie": cookie},
+			Detected{"/d/my.conf", ChainTestnet4, "http://127.0.0.1:48332", "/d/testnet4/.cookie"}},
+		{"the chain of the arguments wins, with its section", []string{"-datadir=/d", "-testnet4"},
+			map[string]string{"/d/bitcoin.conf": "chain=signet\n[testnet4]\nrpcport=1234\n", "/d/testnet4/.cookie": cookie},
+			Detected{"/d/bitcoin.conf", ChainTestnet4, "http://127.0.0.1:1234", "/d/testnet4/.cookie"}},
+		{"-rpcport and -rpccookiefile win", []string{"-datadir=/d", "-rpcport=9000", "-rpccookiefile=/run/c"},
+			map[string]string{"/d/bitcoin.conf": "rpcport=8400\nrpccookiefile=/run/other\n", "/run/c": cookie, "/run/other": cookie},
+			Detected{"/d/bitcoin.conf", ChainMain, "http://127.0.0.1:9000", "/run/c"}},
+		{"-rpccookiefile without a conf", []string{"-rpccookiefile=/run/c", "-regtest"},
+			map[string]string{"/run/c": cookie},
+			Detected{"", ChainRegtest, "http://127.0.0.1:18443", "/run/c"}},
+		{"-datadir without its conf: no other conf is read", []string{"-datadir=/mnt/ssd"},
+			map[string]string{"/etc/bitcoin/bitcoin.conf": "testnet=1\n", "/mnt/ssd/.cookie": cookie},
+			Detected{"", ChainMain, "http://127.0.0.1:8332", "/mnt/ssd/.cookie"}},
+		{"-conf missing: no other cookie", []string{"-conf=/x.conf"},
+			map[string]string{"/var/lib/bitcoind/.cookie": cookie, "/etc/bitcoin/bitcoin.conf": "signet=1\n"},
+			Detected{"", ChainMain, "http://127.0.0.1:8332", "~/.bitcoin/.cookie"}},
+		{"relative paths only: as without arguments", []string{"-conf=x.conf", "-datadir=rel", "-daemon"},
+			map[string]string{"~/.bitcoin/.cookie": cookie},
+			Detected{"", ChainMain, "http://127.0.0.1:8332", "~/.bitcoin/.cookie"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := fakeEnv(t, "linux", nil, tt.files)
+			e.Args = tt.args
+			fix := func(p string) string {
+				if rest, ok := strings.CutPrefix(p, "~/"); ok {
+					return filepath.Join(e.Home, rest)
+				}
+				if p == "" {
+					return ""
+				}
+				return e.path(p)
+			}
+			want := tt.want
+			want.Conf, want.CookieFile = fix(want.Conf), fix(want.CookieFile)
+			if got := e.Detect(); got != want {
+				t.Fatalf("got  %+v\nwant %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestParseArgs(t *testing.T) {
+	got := parseArgs([]string{"-conf=/a", "--datadir=/b", "-testnet", "-rpcport=1", "-rpcport=2", "notanoption", "-x=y=z"})
+	want := map[string]string{"conf": "/a", "datadir": "/b", "testnet": "", "rpcport": "2", "x": "y=z"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 // Without a home, as for the system service, only system places are tried.
 func TestDetectWithoutHome(t *testing.T) {
 	e := fakeEnv(t, "darwin", nil, map[string]string{
@@ -165,7 +241,7 @@ func TestParseBitcoinConf(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseBitcoinConf([]byte(tt.conf))
+			got := parseBitcoinConf([]byte(tt.conf), "")
 			if got != tt.want {
 				t.Fatalf("got %+v, want %+v", got, tt.want)
 			}

@@ -16,6 +16,29 @@ Both modes share the same state file format, so you can switch between them
 at any time. Use only one per state file: the second one would find the file
 locked and exit with code 3.
 
+## System or user service
+
+The service must be able to read bitcoind's cookie. Pick by the user
+bitcoind runs as (`ps -o user=,args= -C bitcoind`):
+
+- **bitcoind runs as you** (datadir in your home, e.g. `~/.bitcoin`): a
+  [user service](#systemd-user-service), `node-tracker setup` without
+  `sudo`. The system service runs as the `node-tracker` user with
+  `ProtectHome=yes`, so it can't read your home.
+- **bitcoind is a system service** (datadir `/var/lib/bitcoind`, as with
+  Bitcoin Core's `contrib/init` units): the
+  [system service](#systemd-system-service), `sudo node-tracker setup`.
+- **The node is on another host** (RPC user and password, `.onion`):
+  either.
+
+As root, setup looks for bitcoind only in `/var/lib/bitcoind` and
+`/etc/bitcoin`. If none answers there, it looks at the bitcoind processes
+of other users and finds each one's cookie as bitcoind does (its
+`-datadir`, `-conf`, chain options and `-rpccookiefile`, else the user's
+`~/.bitcoin`). A cookie in that user's home: setup tells you to run it as
+that user. A cookie elsewhere (e.g. `-datadir=/mnt/ssd/bitcoin`): setup
+shows the path to give; the `node-tracker` user must be able to read it.
+
 ## systemd system service
 
 `sudo node-tracker setup` writes the config and the secrets to
@@ -123,9 +146,10 @@ sudo systemctl enable --now node-tracker
   `/usr/lib/systemd`, but not your drop-ins.
 - An upgrade restarts the system units that are running, not user units:
   run `systemctl --user restart node-tracker` (or the timer) for those.
-- The user units are installed too: copy the example config to
-  `~/.config/node-tracker/config.yaml`, then
-  `systemctl --user enable --now node-tracker`.
+- The user units are installed too: `node-tracker setup` without `sudo`
+  enables them (see [System or user service](#system-or-user-service)); by
+  hand, copy the example config to `~/.config/node-tracker/config.yaml`,
+  then `systemctl --user enable --now node-tracker`.
 
 ## systemd user service
 
@@ -520,6 +544,7 @@ overwritten.
 
 | Symptom | Check |
 |---|---|
+| `sudo node-tracker setup` says `No local bitcoind answered at http://127.0.0.1:8332 with the cookie /var/lib/bitcoind/.cookie` | bitcoind runs as a user, not as a system service: run `node-tracker setup` as that user, without `sudo`. See [System or user service](#system-or-user-service). |
 | `NODE_DOWN` right after setup | `node-tracker check -log-level debug`; its ERROR column hints at the likely cause. Common causes: wrong URL or port, the cookie isn't readable by node-tracker's user (join bitcoind's group: `sudo usermod -aG <group> "$USER"`, log in again; on Bitcoin Core 28+ also set `rpccookieperms=group`), the RPC user lacks `getblockchaininfo` in `rpcwhitelist`, or the node is still starting (`rpc error -28: Loading block index`). |
 | `NO_REFERENCE` | No independent reference answered: no internet, a proxy is needed, or a typo in the URL; `check` shows each error. One failing reference out of several only logs a warning, but a reference on the node's host (your own electrs) answering alone is not enough. |
 | Always `LAGGING` by 1–2 blocks | Normal right after a new block. Raise `threshold` or `for`. |

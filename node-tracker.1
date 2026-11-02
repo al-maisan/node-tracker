@@ -140,6 +140,13 @@ next to it, all mode 0600; as root,
 as
 .B install\-service \-system
 expects.
+As root, it looks for bitcoind only in
+.I /var/lib/bitcoind
+and
+.IR /etc/bitcoin ;
+if none answers there, it points at the bitcoind of another user, found from
+its process: run setup as that user, without sudo, if the cookie is in that
+user's home.
 A file that exists and differs is replaced only after a confirmation (or
 with
 .BR \-force ),

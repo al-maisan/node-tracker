@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"io"
 	"net/url"
 	"os"
@@ -51,6 +52,10 @@ type Env struct {
 	Home   string // "" if unknown
 	GOOS   string
 	Getenv func(string) string // nil: no environment
+	// Args are a running bitcoind's arguments, without the program name:
+	// as in Core, its -datadir, -conf, chain, -rpcport and -rpccookiefile
+	// win over bitcoin.conf.
+	Args []string
 }
 
 // SystemEnv is the real machine. Without a home (HOME unset or "/", as
@@ -90,6 +95,28 @@ func (e Env) datadirs() []conf {
 			cs = append(cs, conf{path, dir})
 		}
 	}
+	// As in Core, a relative -conf is in the datadir, and without -datadir
+	// that is the default one. Only that conf is read then, and only that
+	// datadir has the cookie.
+	args := parseArgs(e.Args)
+	if d, c := args["datadir"], args["conf"]; filepath.IsAbs(d) || filepath.IsAbs(c) {
+		switch {
+		case filepath.IsAbs(d):
+			d = e.path(d)
+		case e.Home != "" && e.GOOS == "darwin":
+			d = filepath.Join(e.Home, "Library", "Application Support", "Bitcoin")
+		case e.Home != "":
+			d = filepath.Join(e.Home, ".bitcoin")
+		default:
+			d = e.path("/var/lib/bitcoind")
+		}
+		if filepath.IsAbs(c) {
+			c = e.path(c)
+		} else {
+			c = filepath.Join(d, cmp.Or(c, "bitcoin.conf"))
+		}
+		return []conf{{c, d}}
+	}
 	if d := e.getenv("BITCOIN_DATADIR"); filepath.IsAbs(d) {
 		add(e.path(d), filepath.Join(e.path(d), "bitcoin.conf"))
 	}
@@ -125,33 +152,42 @@ func (e Env) path(p string) string { return filepath.Join(e.Root, p) }
 // known places gives the chain, the RPC port and the cookie path. The
 // cookie is the first readable one of that and the known datadirs. Only
 // chain, testnet, testnet4, signet, regtest, datadir, rpcport and
-// rpccookiefile are read from bitcoin.conf; credentials never are.
+// rpccookiefile are read from bitcoin.conf, and from e.Args, which win;
+// credentials never are.
 func (e Env) Detect() Detected {
-	d := Detected{Chain: ChainMain}
+	args := parseArgs(e.Args)
+	argChain := chainOf(func(k string) (string, bool) { v, ok := args[k]; return v, ok })
+	d := Detected{Chain: cmp.Or(argChain, ChainMain)}
 	dirs := e.datadirs()
-	var cookies []string
+	var datadir, cookieFile, rpcport string
 	if c, b := firstReadable(dirs); b != nil {
-		bc := parseBitcoinConf(b)
+		bc := parseBitcoinConf(b, argChain)
 		d.Conf, d.Chain = c.path, bc.chain
-		datadir := c.datadir
+		datadir, cookieFile, rpcport = c.datadir, bc.cookieFile, bc.rpcport
 		if filepath.IsAbs(bc.datadir) {
 			datadir = e.path(bc.datadir)
 		}
-		switch cf := bc.cookieFile; {
-		case filepath.IsAbs(cf):
-			cookies = append(cookies, e.path(cf))
-		case cf != "": // relative to the chain's datadir, as in Core
-			cookies = append(cookies, filepath.Join(datadir, chainInfo[d.Chain].subdir, cf))
-		default:
-			cookies = append(cookies, filepath.Join(datadir, chainInfo[d.Chain].subdir, ".cookie"))
-		}
-		if bc.rpcport != "" {
-			d.URL = "http://127.0.0.1:" + bc.rpcport
-		}
 	}
-	if d.URL == "" {
-		d.URL = "http://127.0.0.1:" + chainInfo[d.Chain].port
+	if v := args["datadir"]; filepath.IsAbs(v) {
+		datadir = e.path(v)
 	}
+	if v, ok := args["rpccookiefile"]; ok {
+		cookieFile = v
+	}
+	if v := args["rpcport"]; validPort(v) {
+		rpcport = v
+	}
+	var cookies []string
+	switch {
+	case filepath.IsAbs(cookieFile):
+		cookies = append(cookies, e.path(cookieFile))
+	case datadir == "":
+	case cookieFile != "": // relative to the chain's datadir, as in Core
+		cookies = append(cookies, filepath.Join(datadir, chainInfo[d.Chain].subdir, cookieFile))
+	default:
+		cookies = append(cookies, filepath.Join(datadir, chainInfo[d.Chain].subdir, ".cookie"))
+	}
+	d.URL = "http://127.0.0.1:" + cmp.Or(rpcport, chainInfo[d.Chain].port)
 	for _, c := range dirs {
 		cookies = append(cookies, filepath.Join(c.datadir, chainInfo[d.Chain].subdir, ".cookie"))
 	}
@@ -189,10 +225,11 @@ type bitcoinConf struct{ chain, datadir, rpcport, cookieFile string }
 
 // parseBitcoinConf reads the keys Detect needs, as Bitcoin Core does:
 // key=value lines, # comments, [main]/[test]/[testnet4]/[signet]/[regtest]
-// sections and chain.key=value. The chain is selected at the top level;
+// sections and chain.key=value. The chain is selected at the top level,
+// unless chain is given;
 // rpcport counts at the top level for mainnet only, rpccookiefile for every
 // chain. Other keys, rpcpassword included, are skipped unread.
-func parseBitcoinConf(b []byte) bitcoinConf {
+func parseBitcoinConf(b []byte, chain string) bitcoinConf {
 	type kv struct{ section, key, value string }
 	var kvs []kv
 	section := ""
@@ -228,24 +265,14 @@ func parseBitcoinConf(b []byte) bitcoinConf {
 		}
 		return v, found
 	}
-	c := bitcoinConf{chain: ChainMain}
-	if v, ok := get("", "chain"); ok && chainInfo[v].port != "" {
-		c.chain = v
-	} else {
-		for _, f := range []struct{ key, chain string }{{"regtest", ChainRegtest}, {"signet", ChainSignet}, {"testnet4", ChainTestnet4}, {"testnet", ChainTest}} {
-			if v, ok := get("", f.key); ok && confBool(v) {
-				c.chain = f.chain
-				break
-			}
-		}
-	}
+	c := bitcoinConf{chain: cmp.Or(chain, chainOf(func(k string) (string, bool) { return get("", k) }), ChainMain)}
 	c.datadir, _ = get("", "datadir")
 	if v, ok := get(c.chain, "rpcport"); ok {
 		c.rpcport = v
 	} else if c.chain == ChainMain {
 		c.rpcport, _ = get("", "rpcport")
 	}
-	if n, err := strconv.Atoi(c.rpcport); err != nil || n < 1 || n > 65535 {
+	if !validPort(c.rpcport) {
 		c.rpcport = ""
 	}
 	if v, ok := get(c.chain, "rpccookiefile"); ok {
@@ -254,6 +281,37 @@ func parseBitcoinConf(b []byte) bitcoinConf {
 		c.cookieFile, _ = get("", "rpccookiefile")
 	}
 	return c
+}
+
+// chainOf is the chain that the options of get select, "" for none.
+func chainOf(get func(key string) (string, bool)) string {
+	if v, ok := get("chain"); ok && chainInfo[v].port != "" {
+		return v
+	}
+	for _, f := range []struct{ key, chain string }{{"regtest", ChainRegtest}, {"signet", ChainSignet}, {"testnet4", ChainTestnet4}, {"testnet", ChainTest}} {
+		if v, ok := get(f.key); ok && confBool(v) {
+			return f.chain
+		}
+	}
+	return ""
+}
+
+func validPort(p string) bool {
+	n, err := strconv.Atoi(p)
+	return err == nil && n >= 1 && n <= 65535
+}
+
+// parseArgs reads bitcoind's arguments: -key=value or --key=value, and
+// -key alone as key="" (true for a boolean). The last value wins.
+func parseArgs(args []string) map[string]string {
+	m := map[string]string{}
+	for _, a := range args {
+		if k, ok := strings.CutPrefix(a, "-"); ok {
+			k, v, _ := strings.Cut(strings.TrimPrefix(k, "-"), "=")
+			m[k] = v
+		}
+	}
+	return m
 }
 
 // confBool is Bitcoin Core's reading of a boolean option: empty is true,

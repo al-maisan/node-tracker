@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -206,6 +208,7 @@ func fakeSetup(t *testing.T, tg *fakeTG, ft *fakeTerm) (h *setupHost, installs *
 			return nil
 		},
 		hostname:    func() (string, error) { return "orendil.example.org", nil },
+		userNodes:   func() []userNode { return nil },
 		telegramAPI: tg.srv.URL,
 		torProxy:    config.DefaultTorProxy,
 		poll:        time.Second,
@@ -816,5 +819,82 @@ func TestNodeDownFor(t *testing.T) {
 		if got := a.nodeDownFor(); got != tt.want {
 			t.Errorf("%s preset %d -down-for %d: %d, want %d", tt.url, tt.preset, tt.downFor, got, tt.want)
 		}
+	}
+}
+
+// As root, with no system bitcoind, setup points at a bitcoind run by a
+// user: to a user service for a cookie in the home, else to the cookie.
+func TestSetupUserNodeHint(t *testing.T) {
+	const home = "bitcoind runs as alice, with the cookie in alice's home (/home/alice/.bitcoin/.cookie), which the system service can't read. Run 'node-tracker setup' as alice instead, without sudo"
+	const elsewhere = "bitcoind runs as bob, with the cookie /mnt/ssd/bitcoin/.cookie: give that as the cookie file. The system service runs as node-tracker, which must be able to read it.\n"
+	for _, euid := range []int{0, 1000} {
+		ctx, cancel := context.WithCancel(context.Background())
+		ft := newFakeTerm(t, turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", do: cancel})
+		h, _ := fakeSetup(t, newFakeTG(t), ft)
+		h.euid = euid
+		h.userNodes = func() []userNode {
+			return []userNode{{"alice", "/home/alice/.bitcoin/.cookie", true}, {"bob", "/mnt/ssd/bitcoin/.cookie", false},
+				{"carol", "/nonexistent-node-tracker-test/var/lib/bitcoind/.cookie", false}} // the one tried
+		}
+		runSetup(ctx, ft, "setup")
+		ft.done()
+		cancel()
+		out := ft.transcript()
+		if got := strings.Contains(out, home) && strings.Contains(out, elsewhere); got != (euid == 0) || strings.Contains(out, "carol") {
+			t.Errorf("euid %d: hints shown %v\n%s", euid, got, out)
+		}
+	}
+}
+
+func TestUserNodes(t *testing.T) {
+	proc, homes, data := t.TempDir(), t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(homes, "bob"), 0o755)
+	proc1 := func(pid, comm, uid string, args ...string) {
+		d := filepath.Join(proc, pid)
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "comm"), []byte(comm+"\n"), 0o644)
+		os.WriteFile(filepath.Join(d, "status"), []byte("Name:\t"+comm+"\nUid:\t"+uid+"\t"+uid+"\t"+uid+"\t"+uid+"\nGid:\t0\t0\t0\t0\n"), 0o644)
+		os.WriteFile(filepath.Join(d, "cmdline"), []byte(strings.Join(append([]string{"/usr/bin/" + comm}, args...), "\x00")+"\x00"), 0o644)
+	}
+	cookie := func(p string) string {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("__cookie__:x\n"), 0o600)
+		return p
+	}
+	// A cookie counts only if it is a regular file of the process's owner:
+	// me, as the test can't make files of other users.
+	me, other := strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getuid()+1)
+	alice := cookie(filepath.Join(homes, "alice", ".bitcoin", ".cookie"))
+	os.WriteFile(filepath.Join(homes, "alice", ".bitcoin", "bitcoin.conf"), []byte("server=1\n"), 0o600)
+	signet := cookie(filepath.Join(data, "signet", ".cookie"))
+	proc1("10", "bitcoind", me, "-conf="+filepath.Join(homes, "alice", ".bitcoin", "bitcoin.conf"), "-rpcpassword=s3cret") // found
+	proc1("11", "bitcoin-qt", me)                                                                                          // the same: once
+	proc1("12", "bitcoind", "0")                                                                                           // root: the system's
+	proc1("13", "bash", me)                                                                                                // not bitcoind
+	proc1("14", "bitcoind", other)                                                                                         // bob: no cookie in his home
+	proc1("15", "bitcoind", other, "-rpccookiefile="+alice)                                                                // bob: not his file
+	proc1("16", "bitcoind", "4242")                                                                                        // unknown uid
+	proc1("17", "bitcoind", me, "-datadir="+data, "-signet")                                                               // outside the home
+	proc1("18", "bitcoind", me, "-rpccookiefile="+data)                                                                    // a directory
+	proc1("self", "bitcoind", me)                                                                                          // not a pid
+	users := map[string]user.User{me: {Username: "alice", HomeDir: filepath.Join(homes, "alice")}, other: {Username: "bob", HomeDir: filepath.Join(homes, "bob")}}
+	lookup := func(uid string) (*user.User, error) {
+		u, ok := users[uid]
+		if !ok {
+			return nil, user.UnknownUserIdError(4242)
+		}
+		return &u, nil
+	}
+	want := []userNode{{"alice", alice, true}, {"alice", signet, false}}
+	if got := userNodes(proc, lookup); !slices.Equal(got, want) {
+		t.Errorf("userNodes = %v, want %v", got, want)
+	}
+	// A service account with the home "/": only its arguments count.
+	users[me] = user.User{Username: "svc", HomeDir: "/"}
+	if got, want := userNodes(proc, lookup), []userNode{{"svc", signet, false}}; !slices.Equal(got, want) {
+		t.Errorf("home /: userNodes = %v, want %v", got, want)
+	}
+	if got := userNodes(filepath.Join(proc, "missing"), lookup); got != nil {
+		t.Errorf("no proc: %v", got)
 	}
 }
