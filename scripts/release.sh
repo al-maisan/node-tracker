@@ -72,6 +72,7 @@ gh release create "$tag" --repo "$repo" --verify-tag --title "$tag" --generate-n
 if [[ $tag != *-* ]]; then
 	tap=${repo%%/*}/homebrew-tap
 	echo "release: publish the formula to $tap:"
+	# shellcheck disable=SC2016 # prints a command: $d is the reader's
 	printf 'd=$(mktemp -d) && git clone https://github.com/%s.git "$d" && mkdir -p "$d/Formula" && cp %q "$d/Formula/" && git -C "$d" add Formula/node-tracker.rb && git -C "$d" commit -m "node-tracker %s" && git -C "$d" push\n' \
 		"$tap" "$PWD/dist/node-tracker.rb" "$tag"
 	# Last: the release is out, so a failed push only needs a rerun of this.

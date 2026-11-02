@@ -28,6 +28,7 @@ version=v0.0.0-imagetest
 ref=localhost/node-tracker:$version
 cname=node-tracker-imagetest-$$
 tmp=$(mktemp -d)
+# shellcheck disable=SC2329 # run by the EXIT trap
 cleanup() {
 	"$engine" rm -f -v "$cname" >/dev/null 2>&1
 	if [[ $engine == podman ]]; then podman manifest rm "$ref" >/dev/null 2>&1; else docker rmi "$ref" >/dev/null 2>&1; fi

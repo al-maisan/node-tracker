@@ -30,6 +30,7 @@ commit() { GIT_COMMITTER_DATE=$1 g commit -q --allow-empty -m "$2"; }
 g init -q
 commit 2026-10-01T08:00:00+0200 "Initial commit"
 g tag v1.0.0
+# shellcheck disable=SC2016 # a literal $(id)
 commit 2026-10-20T08:00:00+0200 'Fix 100% of $(id) bugs'
 commit 2026-11-01T08:30:00+0100 "Add a feature (#2)"
 g tag v1.1.0
@@ -46,6 +47,7 @@ check "deb: first release lists its commits" "  * Initial commit" "$(deb_entry v
 check "deb: release without commits" "  * Release v1.1.1." \
 	"$(printf 'v1.1.1\nv1.1.0\n' | deb_entry v1.1.1 1.1.1-1ppa1~resolute1 resolute | sed -n 3p)"
 
+# shellcheck disable=SC2016 # a literal $(id)
 check "rpm: escape doubles %" "- 100%% done, %%(id) %%{version} \$(id)" "$(rpm_escape <<<'- 100% done, %(id) %{version} $(id)')"
 commit 2026-11-02T00:30:00+0100 "Fix %(touch $tmp/pwned) and \$(touch $tmp/pwned2) at 100%"
 g tag v1.2.0

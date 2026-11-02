@@ -26,6 +26,7 @@ VHS=ghcr.io/charmbracelet/vhs@sha256:ea49a6a1c529be83153e88321892b5585964418f0b9
 docker run --rm --network none --add-host mempool.space:127.0.0.1 -v "$WORK:/vhs" -w /vhs "$VHS" demo.tape
 
 cat "$WORK/telegram.log"
+# shellcheck disable=SC2015 # the last command is the error handler
 grep -q 'node-tracker test message' "$WORK/telegram.log" && grep -q 'orendil is lagging' "$WORK/telegram.log" && grep -q 'esplora:mempool.space' "$WORK/telegram.log" ||
     { echo "fake Telegram did not get the test message and the alert from esplora:mempool.space" >&2; exit 1; }
 cp "$WORK/demo.gif" "$DEMO/demo.gif"

@@ -54,8 +54,10 @@ check "sysusers file of postinst" yes "$(grep -q 'systemd-sysusers .* node-track
 
 # The maintainer scripts are copied from the PPA package: a new or renamed
 # unit needs a fresh copy.
+# shellcheck disable=SC2012 # unit names are plain
 units=$(cd "$dir/deploy/systemd/system" && ls | paste -sd' ')
 installable=$(cd "$dir/deploy/systemd/system" && grep -l '^\[Install\]' -- * | paste -sd' ')
+# shellcheck disable=SC2012 # unit names are plain
 check "user units match system units" "$units" "$(cd "$dir/deploy/systemd/user" && ls | paste -sd' ')"
 # An upgrade restarts the running units, and does not stop them before.
 check "no preinst" no "$([[ -e $tmp/x/DEBIAN/preinst ]] && echo yes || echo no)"

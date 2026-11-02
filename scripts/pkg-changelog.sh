@@ -36,6 +36,7 @@ items() {
 		lines=$(git log --no-merges --format=%s --max-count=20 "$tag")
 	fi
 	if [[ -z $lines ]]; then lines="Release $tag."; fi
+	# shellcheck disable=SC2001 # prefixes every line
 	sed "s/^/$bullet/" <<<"$lines"
 }
 
@@ -98,9 +99,9 @@ released=
 for page in {1..10}; do
 	json=$(curl -fsS -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases?per_page=100&page=$page") ||
 		die "cannot list the GitHub releases of $repo"
-	tags=$(release_tags <<<"$json") || die "unexpected answer listing the GitHub releases of $repo"
-	[[ -n $tags ]] || break
-	released+=$tags$'\n'
+	page_tags=$(release_tags <<<"$json") || die "unexpected answer listing the GitHub releases of $repo"
+	[[ -n $page_tags ]] || break
+	released+=$page_tags$'\n'
 done
 releases=$(releases_upto "$tag" <<<"$released")
 for t in $releases; do
