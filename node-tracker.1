@@ -147,6 +147,9 @@ and
 if none answers there, it points at the bitcoind of another user, found from
 its process, and offers to stop, so that setup runs as that user, without
 sudo.
+As root, before anything is written, it checks that the system service can
+read the node's cookie; if not, it shows the fix and writes only if wanted,
+without installing the service.
 A file that exists and differs is replaced only after a confirmation (or
 with
 .BR \-force ),

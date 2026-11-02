@@ -639,6 +639,13 @@ func TestInstallSystemCookie(t *testing.T) {
 	if err := install(e.cookie); err == nil || err.Error() != want {
 		t.Errorf("got\n%v\nwant\n%s", err, want)
 	}
+	// No account yet (tarball, go install): created first, as install-service
+	// would, so that usermod works.
+	e.h.AccountIDs = func() (int, []int, error) { return 0, nil, user.UnknownUserError(Account) }
+	if err := install(e.cookie); err == nil || !strings.Contains(err.Error(), "It will run as user node-tracker (not created yet), which is not in the cookie's group "+g+", and:\n") ||
+		!strings.Contains(err.Error(), "  1. sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin node-tracker\n  2. sudo usermod -aG "+g+" node-tracker\n") {
+		t.Errorf("no account: err = %v", err)
+	}
 	// In the group already: only the paths.
 	e.h.AccountIDs = func() (int, []int, error) { return 99999, []int{os.Getgid()}, nil }
 	if err := install(e.cookie); err == nil || strings.Contains(err.Error(), "usermod") || !strings.Contains(err.Error(), "which is in the cookie's group "+g+", but:\n") ||

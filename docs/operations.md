@@ -45,7 +45,10 @@ the `node-tracker` user must be able to read it.
 ## systemd system service
 
 `sudo node-tracker setup` writes the config and the secrets to
-`/etc/node-tracker/` and runs `install-service -system` for you. By hand,
+`/etc/node-tracker/` and runs `install-service -system` for you. Before
+it writes anything, it checks that the service can read bitcoind's cookie;
+if not, it shows how to fix that and writes the config only if you want,
+without installing the service. By hand,
 `node-tracker install-service -system` sets it up. Install the binary outside
 `/home` first (the unit has `ProtectHome=yes`), and put the secrets in
 `/etc/node-tracker/`:
