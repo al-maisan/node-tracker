@@ -571,6 +571,23 @@ func TestInstallSystemRefusals(t *testing.T) {
 	}
 }
 
+// A blocking directory is opened by the bits that blockers used: the
+// account's own group need not be the cookie's.
+func TestDirFix(t *testing.T) {
+	for _, tt := range []struct {
+		x   blocker
+		fix string
+	}{
+		{blocker{path: "/data", uid: 0, gid: 50}, "sudo chmod g+x /data"}, // a group of the account, not the cookie's
+		{blocker{path: "/data", uid: 0, gid: 60}, "sudo chmod o+x /data"}, // no group of the account
+		{blocker{path: "/data", uid: 7, gid: 50}, "sudo chmod u+x /data"}, // the account's own
+	} {
+		if _, fix := dirFix(tt.x, 7, []int{50, 1000}); fix != tt.fix {
+			t.Errorf("%+v: %q, want %q", tt.x, fix, tt.fix)
+		}
+	}
+}
+
 func TestInstallSystemCookie(t *testing.T) {
 	e := newEnv(t)
 	rootExe(t, e)
@@ -584,7 +601,7 @@ func TestInstallSystemCookie(t *testing.T) {
 
 	// Another uid without the cookie's group: refused, with the hint.
 	e.h.AccountIDs = func() (int, []int, error) { return 99999, nil, nil }
-	if err := install(e.cookie); !errors.As(err, new(UsageError)) || !strings.Contains(err.Error(), "SupplementaryGroups=") {
+	if err := install(e.cookie); !errors.As(err, new(UsageError)) || !strings.Contains(err.Error(), "1. sudo usermod -aG ") {
 		t.Fatalf("unreadable cookie: err = %v", err)
 	}
 	// The group from a drop-in, or the account's own groups, let it in.
@@ -602,9 +619,33 @@ func TestInstallSystemCookie(t *testing.T) {
 	}
 	// Parent directories need x for it too.
 	mkdir(t, filepath.Dir(e.cookie), 0o700)
-	if err := install(e.cookie); err == nil || !strings.Contains(err.Error(), filepath.Dir(e.cookie)+" is ") {
+	if err := install(e.cookie); err == nil || !strings.Contains(err.Error(), "sudo chmod g+x "+filepath.Dir(e.cookie)) {
 		t.Fatalf("closed directory: err = %v", err)
 	}
+	// As on orendil: not in the group, a 0600 cookie in a 0700 datadir. The
+	// group is named, and every path that blocks even in it is listed.
+	os.Chmod(e.cookie, 0o600)
+	e.h.AccountIDs = func() (int, []int, error) { return 99999, nil, nil }
+	g, u, dir := groupName(os.Getgid()), userName(os.Getuid()), filepath.Dir(e.cookie)
+	pad := strings.Repeat(" ", len(e.cookie)-len(dir))
+	want := "the service can't read bitcoind's cookie " + e.cookie + ".\n" +
+		"It runs as user node-tracker, which is not in the cookie's group " + g + ", and:\n" +
+		"  " + e.cookie + "  owner " + u + ", group " + g + ", mode 0600: its group can't read it\n" +
+		"  " + dir + pad + "  owner " + u + ", group " + g + ", mode 0700: its group can't open it\n" +
+		"To fix it:\n" +
+		"  1. sudo usermod -aG " + g + " node-tracker\n" +
+		"  2. add rpccookieperms=group to bitcoin.conf (Bitcoin Core 28 or newer), then restart bitcoind\n" +
+		"  3. sudo chmod g+x " + dir
+	if err := install(e.cookie); err == nil || err.Error() != want {
+		t.Errorf("got\n%v\nwant\n%s", err, want)
+	}
+	// In the group already: only the paths.
+	e.h.AccountIDs = func() (int, []int, error) { return 99999, []int{os.Getgid()}, nil }
+	if err := install(e.cookie); err == nil || strings.Contains(err.Error(), "usermod") || !strings.Contains(err.Error(), "which is in the cookie's group "+g+", but:\n") ||
+		!strings.HasSuffix(err.Error(), "\n  2. sudo chmod g+x "+dir) {
+		t.Errorf("in the group: err = %v", err)
+	}
+	os.Chmod(e.cookie, 0o640)
 	mkdir(t, filepath.Dir(e.cookie), 0o750)
 
 	if err := install(filepath.Join(filepath.Dir(e.cookie), "missing")); err == nil || !strings.Contains(err.Error(), "does not exist") {

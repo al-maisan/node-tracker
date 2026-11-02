@@ -1425,6 +1425,10 @@ func (w *wizard) offerService(ctx context.Context, path string, root, replaced b
 	if o.Config != "" && !root {
 		cmdline += " -config " + path
 	}
+	later := cmdline // typed later, in a user's shell
+	if root {
+		later = "sudo " + cmdline
+	}
 	ok := w.o.installService
 	if !w.o.nonInteractive {
 		var err error
@@ -1433,11 +1437,11 @@ func (w *wizard) offerService(ctx context.Context, path string, root, replaced b
 		}
 	}
 	if !ok {
-		fmt.Fprintf(w.out, "Start it later with: %s (or node-tracker run in a terminal).\n", cmdline)
+		fmt.Fprintf(w.out, "Start it later with: %s (or node-tracker run in a terminal).\n", later)
 		return exitOK, nil
 	}
 	if err := w.install(ctx, w.out, o); err != nil {
-		return exitFailure, fmt.Errorf("install-service: %w; fix it, then run: %s", err, cmdline)
+		return exitFailure, fmt.Errorf("install-service: %w\nOnce that is fixed, run: %s", err, later)
 	}
 	if replaced {
 		fmt.Fprintf(w.out, "If the service was running before, restart it to use the new config: %s restart node-tracker\n", systemctl)

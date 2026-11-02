@@ -76,7 +76,9 @@ It refuses:
 - a `cookie_file` under `/home`, `/root` or `/run/user` (`ProtectHome=yes`
   hides them), and a cookie that the `node-tracker` user can't read through
   its own groups or a `SupplementaryGroups=` drop-in (see below; ACLs are
-  not considered). bitcoind must be running, so the cookie exists;
+  not considered). The refusal names the cookie's group and lists every
+  path that blocks, with its fix. bitcoind must be running, so the cookie
+  exists;
 - a unit or config that differs from what it would write. `-force`
   replaces it and keeps the old one as `.bak`.
 
@@ -110,8 +112,10 @@ sudo systemctl daemon-reload && sudo systemctl enable --now node-tracker
   (for `-timer`: `node-tracker-once.service.d`), or
   `sudo usermod -aG bitcoin node-tracker`. A drop-in, unlike an edit of the
   unit, does not stop `install-service` from updating the unit. The cookie
-  must be readable by that group; on Bitcoin Core 28+ set
-  `rpccookieperms=group` in `bitcoin.conf`.
+  must be readable by that group (on Bitcoin Core 28+ set
+  `rpccookieperms=group` in `bitcoin.conf`), and every directory above it
+  must let the group through: a datadir is often `0700`, then e.g.
+  `chmod g+x /data/bitcoin`.
 - State is kept in `/var/lib/node-tracker/` (`StateDirectory=`).
 - The unit is strongly hardened. Check its exposure score with
   `systemd-analyze security node-tracker`.
