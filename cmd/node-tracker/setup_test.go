@@ -207,6 +207,7 @@ func fakeSetup(t *testing.T, tg *fakeTG, ft *fakeTerm) (h *setupHost, installs *
 			*installs = append(*installs, o)
 			return nil
 		},
+		cookies:     func(*config.Config) error { return nil },
 		hostname:    func() (string, error) { return "orendil.example.org", nil },
 		userNodes:   func() []userNode { return nil },
 		telegramAPI: tg.srv.URL,
@@ -1002,5 +1003,56 @@ func TestUserNodes(t *testing.T) {
 	}
 	if got := userNodes(filepath.Join(proc, "missing"), lookup); got != nil {
 		t.Errorf("no proc: %v", got)
+	}
+}
+
+// As root, the service's cookie check runs before anything is written: if
+// it fails, the config is written only if wanted, and no install is offered.
+func TestSetupCheckServiceFirst(t *testing.T) {
+	refused := service.UsageError{Err: errors.New("the service can't read bitcoind's cookie /data/bitcoin/.cookie.\nTo fix it:\n  1. sudo usermod -aG user node-tracker")}
+	for _, ans := range []string{"", "y"} {
+		ft := newFakeTerm(t, turn{prompt: "Write the config anyway, and install the service once that is fixed? [y/N] ", answer: ans})
+		h, _ := fakeSetup(t, newFakeTG(t), ft)
+		w := &wizard{setupHost: *h, out: ft, root: true, done: make(chan struct{})}
+		w.cookies = func(*config.Config) error { return refused }
+		err := w.checkService(context.Background(), &answers{name: "orendil", node: config.Endpoint{Kind: config.KindBitcoind, CookieFile: "/data/bitcoin/.cookie"}})
+		close(w.done)
+		ft.done()
+		if want := map[string]error{"": errDeclined, "y": nil}[ans]; !errors.Is(err, want) && err != want || w.noSvc != (ans == "y") {
+			t.Errorf("answer %q: err %v, noSvc %v", ans, err, w.noSvc)
+		}
+		if !strings.Contains(ft.transcript(), "Before anything is written: The service can't read bitcoind's cookie /data/bitcoin/.cookie.\nTo fix it:\n") {
+			t.Errorf("no refusal shown:\n%s", ft.transcript())
+		}
+	}
+
+	// -non-interactive: with -install-service nothing is written; without,
+	// the config is written and the install is left for later.
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	src := t.TempDir()
+	pwSrc, tokSrc := filepath.Join(src, "pw"), filepath.Join(src, "tok")
+	os.WriteFile(pwSrc, []byte("s3cret\n"), 0o600)
+	os.WriteFile(tokSrc, []byte(tgToken+"\n"), 0o600)
+	args := []string{"setup", "-non-interactive", "-node-url", w.srv.URL + "/rpc", "-rpc-user", "tracker", "-rpc-password-file", pwSrc,
+		"-token-file", tokSrc, "-chat-id", "42", "-references", w.srv.URL + "/api"}
+	for _, install := range []bool{true, false} {
+		h, installs := fakeSetup(t, newFakeTG(t), nil)
+		h.euid = 0
+		h.group = func() (int, error) { return os.Getgid(), nil }
+		h.cookies = func(*config.Config) error { return refused }
+		var out bytes.Buffer
+		code, errs := runSetup(context.Background(), &out, append(args, "-install-service="+strconv.FormatBool(install))...)
+		_, statErr := os.Stat(filepath.Join(h.etcDir, "config.yaml"))
+		switch {
+		case install && (code != exitUsage || !strings.Contains(errs, "-install-service: the service can't read bitcoind's cookie") || statErr == nil):
+			t.Errorf("-install-service: code %d, config written %v\n%s", code, statErr == nil, errs)
+		case !install && (code != exitOK || statErr != nil || !strings.Contains(out.String(), "Once the service can read the cookie (see above), install it: sudo node-tracker install-service -system\n")):
+			t.Errorf("no -install-service: code %d, config %v\n%s\n%s", code, statErr, out.String(), errs)
+		}
+		if len(*installs) != 0 {
+			t.Errorf("install-service ran: %v", *installs)
+		}
 	}
 }

@@ -80,6 +80,7 @@ type setupHost struct {
 	etcDir      string                      // config and secrets of the system service
 	group       func() (gid int, err error) // of service.Account
 	install     func(ctx context.Context, out io.Writer, o service.Options) error
+	cookies     func(cfg *config.Config) error // service.CheckCookies
 	hostname    func() (string, error)
 	userNodes   func() []userNode // bitcoinds run by users, see userNodes
 	telegramAPI string
@@ -102,6 +103,7 @@ var newSetupHost = func() setupHost {
 		install: func(ctx context.Context, out io.Writer, o service.Options) error {
 			return service.Install(ctx, service.NewHost(out, out), o)
 		},
+		cookies:     func(cfg *config.Config) error { return service.CheckCookies(sh, cfg) },
 		hostname:    os.Hostname,
 		userNodes:   func() []userNode { return userNodes("/proc", user.LookupId) },
 		telegramAPI: config.DefaultTelegramAPI,
@@ -219,6 +221,7 @@ type wizard struct {
 	done  chan struct{} // closed when setup ends
 	wrote bool          // a file was written
 	root  bool          // writing for the system service
+	noSvc bool          // the system service can't use the node yet: no install offered
 }
 
 // answers is what goes into the config.
@@ -1264,6 +1267,12 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 	for _, f := range files[:len(files)-1] {
 		fmt.Fprintf(w.out, "%s goes to %s (mode %04o).\n", upper(f.what), f.path, mode)
 	}
+	if err := w.checkService(ctx, a); err != nil {
+		if errors.Is(err, errDeclined) {
+			return exitFailure, err
+		}
+		return exitUsage, err
+	}
 	if len(exist) > 0 {
 		q := fmt.Sprintf("These files exist and differ: %s. Replace them (the old config is kept as .bak, old secrets are not)?", strings.Join(exist, ", "))
 		if w.o.nonInteractive {
@@ -1337,6 +1346,31 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 		fmt.Fprintln(w.out, "The chat was tested above: setup sent the test message.")
 	}
 	return w.offerService(ctx, path, root, files[len(files)-1].bak)
+}
+
+// checkService runs, as root and before anything is written, the check of
+// install-service -system that the service can read the node's cookie. If
+// it can't, the config is written only if wanted, and the install is not
+// offered; -non-interactive -install-service refuses.
+func (w *wizard) checkService(ctx context.Context, a *answers) error {
+	if !w.root || w.goos == "darwin" {
+		return nil
+	}
+	err := w.cookies(&config.Config{Targets: []config.Target{{Name: a.name, Node: a.node, References: a.refs}}})
+	var ue service.UsageError
+	if !errors.As(err, &ue) {
+		return err
+	}
+	fmt.Fprintf(w.out, "\nBefore anything is written: %s\n", upper(err.Error()))
+	if w.o.nonInteractive {
+		if w.o.installService {
+			return fmt.Errorf("-install-service: %w", err)
+		}
+	} else if ok, err := w.yes(ctx, "Write the config anyway, and install the service once that is fixed?", false); err != nil || !ok {
+		return cmp.Or(err, errDeclined)
+	}
+	w.noSvc = true
+	return nil
 }
 
 // nodeDownFor is the alert.down_for of a: -down-for if given, else about
@@ -1429,6 +1463,10 @@ func (w *wizard) offerService(ctx context.Context, path string, root, replaced b
 	if root {
 		later = "sudo " + cmdline
 	}
+	if w.noSvc {
+		fmt.Fprintf(w.out, "Once the service can read the cookie (see above), install it: %s\n", later)
+		return exitOK, nil
+	}
 	ok := w.o.installService
 	if !w.o.nonInteractive {
 		var err error
@@ -1441,7 +1479,7 @@ func (w *wizard) offerService(ctx context.Context, path string, root, replaced b
 		return exitOK, nil
 	}
 	if err := w.install(ctx, w.out, o); err != nil {
-		return exitFailure, fmt.Errorf("install-service: %w\nOnce that is fixed, run: %s", err, later)
+		return exitFailure, fmt.Errorf("install-service: %w\nThe config is written; nothing else was changed. Once that is fixed, run: %s", err, later)
 	}
 	if replaced {
 		fmt.Fprintf(w.out, "If the service was running before, restart it to use the new config: %s restart node-tracker\n", systemctl)

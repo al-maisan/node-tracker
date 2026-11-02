@@ -286,7 +286,7 @@ func (in *installer) account(ctx context.Context) error {
 	uid, gid, err := in.h.Owner()
 	var unknown user.UnknownUserError
 	if errors.As(err, &unknown) {
-		if err := in.run(ctx, "useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", Account); err != nil {
+		if err := in.run(ctx, append([]string{"useradd"}, useradd...)...); err != nil {
 			return fmt.Errorf("creating user %s: %w", Account, err)
 		}
 		if in.o.DryRun {
@@ -425,6 +425,15 @@ func (in *installer) checkCookies(cfg *config.Config) error {
 	return nil
 }
 
+// useradd are the arguments that create Account, with its own group.
+var useradd = []string{"--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", Account}
+
+// CheckCookies is the check of install-service -system that the service
+// can read every cookie_file of cfg, for setup to run before it writes.
+func CheckCookies(h Host, cfg *config.Config) error {
+	return (&installer{h: h, o: Options{System: true}}).checkCookies(cfg)
+}
+
 // dropInGroups are the SupplementaryGroups= of the *.conf drop-ins in dir.
 func dropInGroups(dir string) ([]string, error) {
 	confs, err := filepath.Glob(filepath.Join(dir, "*.conf"))
@@ -497,10 +506,11 @@ func blockers(path string, uid int, gids []int) ([]blocker, int, error) {
 	}
 }
 
-// cookieError tells in plain words why the service account (uid, gids)
-// can't read the cookie at path, whose group is gid, and how to fix it as
-// commands: join that group, then open each path that still blocks. bitcoind
-// rewrites the cookie on start, so its mode comes from rpccookieperms.
+// cookieError tells in plain words why the service account (uid, gids;
+// uid -1: not created yet) can't read the cookie at path, whose group is
+// gid, and how to fix it as commands: create the account if needed, join
+// that group, then open each path that still blocks. bitcoind rewrites the
+// cookie on start, so its mode comes from rpccookieperms.
 func cookieError(path string, uid int, gids []int, gid int) error {
 	g, in := groupName(gid), slices.Contains(gids, gid)
 	joined := append(slices.Clone(gids), gid)
@@ -510,15 +520,22 @@ func cookieError(path string, uid int, gids []int, gid int) error {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "the service can't read bitcoind's cookie %s.\n", path)
+	runs := "It runs as user " + Account
+	if uid == -1 {
+		runs = "It will run as user " + Account + " (not created yet)"
+	}
 	switch {
 	case in:
-		fmt.Fprintf(&b, "It runs as user %s, which is in the cookie's group %s, but:\n", Account, g)
+		fmt.Fprintf(&b, "%s, which is in the cookie's group %s, but:\n", runs, g)
 	case len(bs) > 0:
-		fmt.Fprintf(&b, "It runs as user %s, which is not in the cookie's group %s, and:\n", Account, g)
+		fmt.Fprintf(&b, "%s, which is not in the cookie's group %s, and:\n", runs, g)
 	default:
-		fmt.Fprintf(&b, "It runs as user %s, which is not in the cookie's group %s.\n", Account, g)
+		fmt.Fprintf(&b, "%s, which is not in the cookie's group %s.\n", runs, g)
 	}
 	var fixes []string
+	if uid == -1 { // as install-service would create it
+		fixes = append(fixes, "sudo useradd "+strings.Join(useradd, " "))
+	}
 	if !in {
 		fixes = append(fixes, "sudo usermod -aG "+g+" "+Account)
 	}
