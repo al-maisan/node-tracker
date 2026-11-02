@@ -250,7 +250,7 @@ func (w *wizard) run(ctx context.Context) (int, error) {
 	if w.o.nonInteractive {
 		a, err = w.fromFlags(ctx)
 	} else {
-		a, err = w.interview(ctx)
+		a, err = w.interview(ctx, path)
 	}
 	if err != nil {
 		return exitUsage, err
@@ -352,7 +352,7 @@ func (w *wizard) secret(ctx context.Context, q string) (config.Secret, error) {
 	return config.Secret(l), err
 }
 
-func (w *wizard) interview(ctx context.Context) (*answers, error) {
+func (w *wizard) interview(ctx context.Context, path string) (*answers, error) {
 	fmt.Fprintln(w.out, "node-tracker setup: a few questions, each answer is tested right away. Enter takes the [default].\nNothing is written before the end; Ctrl-C aborts.")
 	a := &answers{preset: defaultPreset}
 
@@ -397,7 +397,7 @@ func (w *wizard) interview(ctx context.Context) (*answers, error) {
 	}
 
 	fmt.Fprintln(w.out, "\n4. Telegram")
-	if err := w.askTelegram(ctx, a); err != nil {
+	if err := w.askTelegram(ctx, a, path); err != nil {
 		return nil, err
 	}
 	return a, nil
@@ -686,13 +686,33 @@ func presetIndex(s string) (int, bool) {
 	return 0, false
 }
 
-func (w *wizard) askTelegram(ctx context.Context, a *answers) error {
-	fmt.Fprintln(w.out, "In Telegram, open @BotFather (https://t.me/BotFather), send /newbot and choose a name.\nIt replies with the bot's token. Details: docs/telegram.md.")
-	var user string
+// askTelegram finds the bot and the chat: those of the config at path, if
+// kept, else a token and a chat asked for.
+func (w *wizard) askTelegram(ctx context.Context, a *answers, path string) error {
+	user, done, err := w.keepTelegram(ctx, a, path)
+	if err != nil || done {
+		return err
+	}
+	if a.token == "" {
+		had, err := w.yes(ctx, "Do you already have a Telegram bot for the alerts?", false)
+		if err != nil {
+			return err
+		}
+		if had {
+			fmt.Fprintln(w.out, "In Telegram, open the chat with @BotFather (https://t.me/BotFather), not with your bot.\nSend /mybots there, pick your bot and tap API Token.")
+		} else {
+			fmt.Fprintln(w.out, "In Telegram, open the chat with @BotFather (https://t.me/BotFather).\nSend /newbot there and choose a name and a username ending in bot.")
+		}
+		fmt.Fprintln(w.out, "It shows the bot's token. Details: docs/telegram.md.")
+	}
 	for a.token == "" {
 		tok, err := w.secret(ctx, "Bot token")
 		if err != nil {
 			return err
+		}
+		if tok == "" {
+			fmt.Fprintln(w.out, "No token entered: paste it and press Enter; the input stays hidden.")
+			continue
 		}
 		if user, err = w.testToken(ctx, a, tok); err != nil {
 			return err
@@ -700,11 +720,13 @@ func (w *wizard) askTelegram(ctx context.Context, a *answers) error {
 	}
 	if user == "" {
 		fmt.Fprintf(w.out, "Token …%s kept untested. Without Telegram the chat can't be found or tested now: type its id.\n", tail(a.token))
-		var err error
-		if a.chatID, err = w.askChatID(ctx, ""); err == nil {
-			fmt.Fprintln(w.out, "Once Telegram answers, send a test message: node-tracker test-notify")
+		for a.chatID == "" {
+			if a.chatID, err = w.askChatID(ctx, "Chat id or @channel", ""); err != nil {
+				return err
+			}
 		}
-		return err
+		fmt.Fprintln(w.out, "Once Telegram answers, send a test message: node-tracker test-notify")
+		return nil
 	}
 	fmt.Fprintf(w.out, "Bot: @%s (token …%s)\n", user, tail(a.token))
 	for {
@@ -721,6 +743,67 @@ func (w *wizard) askTelegram(ctx context.Context, a *answers) error {
 		a.chatID, a.chatTested = id, true
 		return nil
 	}
+}
+
+// keepTelegram offers the bot and chat of the config at path. Kept, they
+// are tested: done if the test message went through, or if Telegram does
+// not answer (kept untested). A rejected token is dropped; a valid one
+// whose chat fails stays in a.token, and its bot is returned.
+func (w *wizard) keepTelegram(ctx context.Context, a *answers, path string) (user string, done bool, err error) {
+	n, ok := w.prevTelegram(path)
+	if !ok {
+		return "", false, nil
+	}
+	q := fmt.Sprintf("Keep the Telegram bot and chat of %s (chat %s, token …%s)?", path, n.ChatID, tail(n.BotToken))
+	if ok, err := w.yes(ctx, q, true); err != nil || !ok {
+		return "", false, err
+	}
+	api, hc := w.telegramAPI, w.tg
+	if n.APIURL != "" {
+		w.telegramAPI = n.APIURL
+	}
+	if err := w.useTelegramProxy(a, n.Proxy); err != nil {
+		return "", false, err
+	}
+	user, err = w.checkToken(ctx, n.BotToken)
+	switch {
+	case errors.Is(err, errTelegramDown):
+		fmt.Fprintf(w.out, "%v\nKept untested. Once Telegram answers, send a test message: node-tracker test-notify\n", err)
+		a.token, a.chatID = n.BotToken, n.ChatID
+		return "", true, nil
+	case err != nil:
+		fmt.Fprintln(w.out, err)
+		w.telegramAPI, w.tg, a.tgProxy = api, hc, ""
+		return "", false, nil
+	}
+	a.token = n.BotToken
+	fmt.Fprintf(w.out, "Bot: @%s. Sending a test message … ", user)
+	if err := w.sendTest(ctx, a.token, n.ChatID, a.tracker); err != nil {
+		fmt.Fprintf(w.out, "failed: %s\n", err)
+		return user, false, nil
+	}
+	fmt.Fprintln(w.out, "sent. It should be in Telegram now.")
+	a.chatID, a.chatTested = n.ChatID, true
+	return user, true, nil
+}
+
+// prevTelegram is the first Telegram notifier, with its token, of the
+// config at path, if that loads.
+func (w *wizard) prevTelegram(path string) (config.Notifier, bool) {
+	if _, err := os.Stat(path); err != nil {
+		return config.Notifier{}, false
+	}
+	cfg, _, err := config.LoadEnv(path, detectEnv)
+	if err != nil {
+		fmt.Fprintf(w.out, "The Telegram settings of %s can't be kept: %v\n", path, err)
+		return config.Notifier{}, false
+	}
+	for _, n := range cfg.Notifiers {
+		if n.Kind == config.KindTelegram && n.BotToken != "" {
+			return n, true
+		}
+	}
+	return config.Notifier{}, false
 }
 
 // testToken checks tok with Telegram. It sets a.token and returns the bot's
@@ -798,7 +881,7 @@ func (w *wizard) checkToken(ctx context.Context, tok config.Secret) (string, err
 	user, err := w.bot(tok, "").CheckToken(cctx)
 	switch {
 	case errors.Is(err, telegram.ErrBadToken):
-		return "", errors.New("telegram rejected the token; copy it again from @BotFather")
+		return "", errors.New("telegram rejected the token; copy only the token (e.g. 123456789:AAH…) again from @BotFather")
 	case err != nil:
 		return "", fmt.Errorf("%w: %s", errTelegramDown, explain.Printable(err.Error()))
 	case !explain.BotUser.MatchString(user):
@@ -807,16 +890,52 @@ func (w *wizard) checkToken(ctx context.Context, tok config.Secret) (string, err
 	return user, nil
 }
 
-// askChat finds the chat id: the user taps a /start link with a fresh
-// nonce, or types the id. Only "/start <nonce>" counts, so old updates and
-// other users' messages are ignored.
+// askChat asks where the alerts go and finds the chat id: from a /start
+// link with a fresh nonce for a private chat or a group, else typed.
 func (w *wizard) askChat(ctx context.Context, tok config.Secret, user string) (string, error) {
+	for {
+		fmt.Fprintln(w.out, "Where should the alerts go?\n"+
+			"  1  to you, in a private chat with the bot\n"+
+			"  2  a group\n"+
+			"  3  a channel (the bot must be one of its admins)\n"+
+			"  4  a chat id you already know")
+		c, err := w.ask(ctx, "Choice", "1")
+		if err != nil {
+			return "", err
+		}
+		var id string
+		switch c {
+		case "1", "2":
+			id, err = w.waitStart(ctx, tok, user, c == "2")
+		case "3":
+			id, err = w.askChatID(ctx, "Channel's @name (Enter: back)", user)
+		case "4":
+			id, err = w.askChatID(ctx, "Chat id (Enter: back)", user)
+		default:
+			fmt.Fprintln(w.out, "Pick 1, 2, 3 or 4.")
+		}
+		if err != nil || id != "" {
+			return id, err
+		}
+	}
+}
+
+// waitStart shows the /start link of a private chat or a group and waits
+// for its "/start <nonce>". Only that counts, so old updates and other
+// users' messages are ignored. Lines typed meanwhile do not stop the wait.
+// It returns "" if nothing arrived.
+func (w *wizard) waitStart(ctx context.Context, tok config.Secret, user string, group bool) (string, error) {
 	b := make([]byte, 16)
 	rand.Read(b)
 	nonce := base64.RawURLEncoding.EncodeToString(b)
-	fmt.Fprintf(w.out, "Where should the alerts go? Open one of these links in Telegram and press Start:\n"+
-		"  to you:    https://t.me/%s?start=%s\n  a group:   https://t.me/%[1]s?startgroup=%[2]s\n", user, nonce)
-	fmt.Fprintf(w.out, "Waiting up to %s … (or type a chat id or @channel and press Enter)\n", w.waitChat)
+	if group {
+		fmt.Fprintf(w.out, "Open this link in Telegram, on any device, pick the group and add the bot:\n  https://t.me/%s?startgroup=%s\n"+
+			"If nothing happens (e.g. the bot is in the group already), send this message in the group:\n  /start@%[1]s %[2]s\n", user, nonce)
+	} else {
+		fmt.Fprintf(w.out, "Open this link in Telegram, on any device, and press Start:\n  https://t.me/%s?start=%s\n"+
+			"If nothing happens, send the bot this message:\n  /start %[2]s\n", user, nonce)
+	}
+	fmt.Fprintf(w.out, "Waiting up to %s; there is nothing to type here (Ctrl-C aborts) …\n", w.waitChat)
 	pctx, cancel := context.WithTimeout(ctx, w.waitChat)
 	defer cancel()
 	type found struct {
@@ -824,53 +943,60 @@ func (w *wizard) askChat(ctx context.Context, tok config.Secret, user string) (s
 		err  error
 	}
 	res := make(chan found, 1)
-	typed := "" // while waiting
 	go func() {
 		c, err := w.pollStart(pctx, w.bot(tok, ""), user, nonce)
 		res <- found{c, err}
 	}()
-	select {
-	case r := <-res:
-		switch {
-		case r.err == nil:
-			id := strconv.FormatInt(r.chat.ID, 10)
-			fmt.Fprintf(w.out, "Found: %s, chat id %s\n", chatName(r.chat), id)
-			return id, nil
-		case ctx.Err() != nil:
+	for {
+		select {
+		case r := <-res:
+			switch {
+			case r.err == nil:
+				id := strconv.FormatInt(r.chat.ID, 10)
+				fmt.Fprintf(w.out, "Found: %s, chat id %s\n", chatName(r.chat), id)
+				return id, nil
+			case ctx.Err() != nil:
+				return "", ctx.Err()
+			case errors.Is(r.err, telegram.ErrConflict):
+				fmt.Fprintln(w.out, "Telegram refuses to hand out the bot's messages: the bot has a webhook, or another program reads its updates.\nRemove the webhook (Bot API deleteWebhook) or stop that program, or pick 4 and type the chat id.")
+			case pctx.Err() != nil:
+				fmt.Fprintf(w.out, "Nothing arrived within %s.\n", w.waitChat)
+			default:
+				fmt.Fprintf(w.out, "Could not read the bot's messages: %s\n", explain.Printable(r.err.Error()))
+			}
+			return "", nil
+		case _, ok := <-w.input():
+			if !ok {
+				return "", errInputEnded
+			}
+			fmt.Fprintln(w.out, "Still waiting: open the link above in Telegram, or send the message above. Ctrl-C aborts.")
+		case <-ctx.Done():
 			return "", ctx.Err()
-		case errors.Is(r.err, telegram.ErrConflict):
-			fmt.Fprintln(w.out, "Telegram refuses to hand out the bot's messages: the bot has a webhook, or another program reads its updates.\nRemove the webhook (Bot API deleteWebhook) or stop that program, or type the chat id.")
-		case pctx.Err() != nil:
-			fmt.Fprintf(w.out, "Nothing arrived within %s.\n", w.waitChat)
-		default:
-			fmt.Fprintf(w.out, "Could not read the bot's messages: %s\n", explain.Printable(r.err.Error()))
 		}
-	case l, ok := <-w.input():
-		cancel()
-		if !ok {
-			return "", errInputEnded
-		}
-		typed = l
-	case <-ctx.Done():
-		return "", ctx.Err()
 	}
-	return w.askChatID(ctx, typed)
 }
 
-// askChatID asks for a chat id until it is valid; typed is a first answer.
-func (w *wizard) askChatID(ctx context.Context, typed string) (string, error) {
-	for ; ; typed = "" {
-		if typed == "" {
-			var err error
-			if typed, err = w.ask(ctx, "Chat id or @channel", ""); err != nil {
-				return "", err
+// askChatID asks for a chat id until it is valid and not the bot itself,
+// with q. With a bot, Enter returns "" (back); without one ("": untested
+// token), Enter asks again.
+func (w *wizard) askChatID(ctx context.Context, q, bot string) (string, error) {
+	for {
+		id, err := w.ask(ctx, q, "")
+		switch {
+		case err != nil:
+			return "", err
+		case id == "" && bot != "":
+			return "", nil
+		case id == "":
+		case bot != "" && strings.EqualFold(strings.TrimPrefix(id, "@"), bot):
+			fmt.Fprintf(w.out, "@%s is the bot itself, it can't send to itself. For a chat with you, go back (Enter) and pick 1.\n", bot)
+		default:
+			if err := config.CheckChatID(id); err != nil {
+				fmt.Fprintf(w.out, "The chat id %v\n", err)
+				continue
 			}
+			return id, nil
 		}
-		err := config.CheckChatID(typed)
-		if err == nil {
-			return typed, nil
-		}
-		fmt.Fprintf(w.out, "The chat id %v\n", err)
 	}
 }
 

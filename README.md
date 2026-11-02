@@ -63,9 +63,10 @@ details of each way: [docs/install.md](docs/install.md).
    ```
 
    It finds your local bitcoind or asks for your node (`.onion` included),
-   takes the token of a Telegram bot you create with @BotFather, and finds
-   your chat when you tap a link. Every answer is tested, including a test
-   message; then it writes the config and offers to start the service.
+   takes the token of a new or existing Telegram bot (@BotFather), and finds
+   your chat when you tap a link (or takes a channel or a chat id). Every
+   answer is tested, including a test message; then it writes the config
+   and offers to start the service.
 3. **Done.** By default you get a message when the node is more than 3
    blocks behind for two checks in a row, and another when it is back.
    `node-tracker check` shows the current state at any time.

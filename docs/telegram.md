@@ -3,14 +3,32 @@
 You need two things: a **bot token**, which lets node-tracker send messages,
 and a **chat id**, which says where the messages go.
 
-`node-tracker setup` does most of this for you: you create the bot (step
-1) and paste its token; setup checks it with Telegram's `getMe` and shows
-the bot's name. It then shows a link like
-`https://t.me/my_node_alerts_bot?start=<code>` (and `?startgroup=` for a
-group): open it, press Start, and setup finds the chat id. The code is new
-for each run, so old messages and messages from others are ignored. Last,
-it sends a test message. If the bot has a webhook, Telegram does not hand
-out its messages (HTTP 409): remove the webhook, or type the chat id.
+`node-tracker setup` does most of this for you:
+
+1. **A rerun** offers to keep the bot and chat of the existing config; yes
+   sends a test message, and the Telegram step is done.
+2. **The bot:** you create one (step 1 below), or for a bot you have, send
+   `/mybots` in the chat with @BotFather (not with your bot), pick the bot
+   and tap **API Token**. Paste the
+   token; setup checks it with Telegram's `getMe` and shows the bot's name.
+3. **Where the alerts go:**
+   - **1 to you** or **2 a group:** setup shows a link like
+     `https://t.me/my_node_alerts_bot?start=<code>` (`?startgroup=` for a
+     group). Open it in Telegram on any device (e.g. Ctrl+click it, or send
+     it to yourself in Saved Messages and tap it on your phone) and press
+     Start; for a group, pick the group. This works in a chat with the bot
+     that already exists, too. If nothing happens, send the message setup
+     shows: `/start <code>`, or `/start@my_node_alerts_bot <code>` in a
+     group. Setup sees it by itself; there is nothing to type. The code is new for each run, so
+     old messages and messages from others are ignored.
+   - **3 a channel:** type its `@name`; the bot must be one of its admins.
+   - **4 a chat id you already know:** type it.
+
+   The bot's own `@name` is refused: a bot can't message itself.
+4. Last, it sends a test message.
+
+If the bot has a webhook, Telegram does not hand out its messages
+(HTTP 409): remove the webhook, or pick 4 and type the chat id.
 
 If Telegram does not answer (blocked network, or a host that reaches the
 internet only through Tor), setup offers **[r]etry**, **[k]eep the token
@@ -28,7 +46,8 @@ The rest of this page is the manual way.
 1. In Telegram, open a chat with **@BotFather** and send `/newbot`.
 2. Choose a display name (e.g. `My node alerts`) and a username ending in
    `bot` (e.g. `my_node_alerts_bot`).
-3. BotFather replies with a token like `123456789:AAH…`. Treat it like a
+3. BotFather replies with a token like `123456789:AAH…` (for a bot you
+   have: `/mybots` to @BotFather, pick the bot, **API Token**). Treat it like a
    password: anyone with it can send messages as your bot.
 
 Save the token in a file only you can read (`cat` waits for the token:

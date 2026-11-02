@@ -359,8 +359,11 @@ are set are used as they are.
   config validation, and the whole config through `config.Load` before it
   is written. The chat id comes from a `/start` link with a random 16-byte
   code, matched exactly, so stale updates and other users can't inject a
-  chat. Text from the network (chat titles, errors) is stripped of control
-  characters before it is printed. The `rpcauth=` line is made in Go, as
+  chat. A typed channel or chat id goes through the same validation, and
+  the bot's own `@name` is refused. A bot and chat kept from the existing
+  config are loaded with it and tested before use. Text from the network
+  (chat titles, errors) is stripped of control characters before it is
+  printed. The `rpcauth=` line is made in Go, as
   Bitcoin Core's `rpcauth.py` does. No shell is run.
 - **State file** is created `0600` in a `0700` directory. It holds heights
   and states only, never secrets.
