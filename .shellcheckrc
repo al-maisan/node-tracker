@@ -1,0 +1,3 @@
+# Follow sourced files (make lint): source= paths are relative to the script.
+external-sources=true
+source-path=SCRIPTDIR

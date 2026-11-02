@@ -12,7 +12,7 @@ if [[ ! $VERSION =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
 fi
 
 # Same output whatever the caller's environment says.
-export CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOFLAGS= GOEXPERIMENT=
+export CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOFLAGS='' GOEXPERIMENT=''
 
 # No Windows: the state lock uses flock.
 # armv6 runs on every Raspberry Pi, Zero and 1 included.

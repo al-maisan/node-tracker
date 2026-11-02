@@ -474,8 +474,8 @@ because a person reads them.
 - **Integration (build tag `integration`, `make integration`):** starts a
   throwaway `bitcoind -regtest`, mines blocks and checks the reported
   heights.
-- **CI (GitHub Actions):** `gofmt`, `go vet`, `staticcheck`, `go test
-  -race`, `govulncheck`.
+- **CI (GitHub Actions):** `gofmt`, `go vet`, `staticcheck`, `shellcheck`,
+  `go test -race`, `govulncheck`.
 
 ## 10. Out of scope for v1 (possible later)
 

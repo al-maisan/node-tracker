@@ -35,11 +35,11 @@ ghcr_login() {
 
 # Prints the digest of the one image in the OCI layout <dir>.
 oci_digest() {
-	local d
-	mapfile -t d < <(grep -o '"digest": *"sha256:[0-9a-f]\{64\}"' "$1/index.json" 2>/dev/null | grep -o 'sha256:[0-9a-f]*')
-	if ((${#d[@]} != 1)); then
+	local -a digests
+	mapfile -t digests < <(grep -o '"digest": *"sha256:[0-9a-f]\{64\}"' "$1/index.json" 2>/dev/null | grep -o 'sha256:[0-9a-f]*')
+	if ((${#digests[@]} != 1)); then
 		echo "$1/index.json does not list exactly one image" >&2
 		return 1
 	fi
-	echo "${d[0]}"
+	echo "${digests[0]}"
 }

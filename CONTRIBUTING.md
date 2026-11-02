@@ -14,7 +14,7 @@ all welcome.
 
 ```sh
 make test         # unit + end-to-end tests with the race detector
-make lint         # gofmt, go vet, staticcheck
+make lint         # gofmt, go vet, staticcheck, shellcheck
 make vuln         # govulncheck
 make integration  # needs bitcoind in PATH; starts a throwaway regtest node
 make build        # bin/node-tracker with version, commit and build time
@@ -25,6 +25,9 @@ make image        # container image of dist/: OCI layout in dist/image (podman o
 make test-image   # builds and runs a test image; skipped without podman or docker
 make srpm         # source RPM of the newest stable tag (rpmbuild)
 ```
+
+`make lint` needs shellcheck (Fedora: `sudo dnf install ShellCheck`;
+Debian/Ubuntu: `sudo apt install shellcheck`).
 
 CI runs `lint`, `test`, `test-ppa`, `test-copr`, `vuln` and `dist`, and
 checks the Homebrew formula syntax, on every pull request.
