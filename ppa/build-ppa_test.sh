@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for the upload detection in build-ppa.sh: make test-ppa
-# No network: feeds getPublishedSources-shaped JSON on stdin.
+# No network: feeds getPublishedSources-shaped JSON on stdin; curl is stubbed.
 set -uo pipefail
 
 # shellcheck source=build-ppa.sh
@@ -36,6 +36,13 @@ check "new version: revision 1" 1 "$(next_rev "$up")"
 
 check "empty PPA" "" "$(uploaded_versions 1.0.0 <<<'{"entries": []}')"
 check "bad JSON fails" no "$(yes_no uploaded_versions 1.0.0 <<<'<html>' 2>/dev/null)"
+
+# shellcheck disable=SC2329 # stands in for curl in launchpad_uploads
+curl() { printf '%s\n' "$@"; }
+args=$(launchpad_uploads)
+check "uploads: bypasses the proxy cache" yes "$(yes_no grep -qx 'Cache-Control: no-cache' <<<"$args")"
+check "uploads: every status (none filtered)" no "$(yes_no grep -q 'status=' <<<"$args")"
+unset -f curl
 
 k=$release_key
 check "release key signed (primary)" yes "$(yes_no signed_by_release_key <<<"[GNUPG:] VALIDSIG $k 2026-11-01 0 0 4 0 1 10 00 $k")"
