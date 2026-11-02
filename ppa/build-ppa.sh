@@ -18,6 +18,13 @@ die() {
 	exit 1
 }
 
+# Prints Launchpad's getPublishedSources JSON: every upload, newest first.
+# no-cache: Launchpad's proxy serves anonymous API reads minutes stale, which
+# hides a fresh upload.
+launchpad_uploads() {
+	curl -fsS -H 'Cache-Control: no-cache' "https://api.launchpad.net/1.0/~$lp_owner/+archive/ubuntu/$lp_ppa?ws.op=getPublishedSources&source_name=node-tracker&exact_match=true&ws.size=300"
+}
+
 # Reads Launchpad's getPublishedSources JSON on stdin; prints the package
 # versions uploaded for upstream <version>.
 uploaded_versions() {
@@ -58,9 +65,8 @@ version=${tag#v}
 commit=$(git -C "$src" rev-parse --short "$tag^{commit}")
 
 # Fail loudly: guessing "nothing uploaded" would build a new orig tarball,
-# which Launchpad rejects. Newest uploads come first.
-json=$(curl -fsS "https://api.launchpad.net/1.0/~$lp_owner/+archive/ubuntu/$lp_ppa?ws.op=getPublishedSources&source_name=node-tracker&exact_match=true&ws.size=300") ||
-	die "cannot ask Launchpad for the uploads"
+# which Launchpad rejects.
+json=$(launchpad_uploads) || die "cannot ask Launchpad for the uploads"
 uploaded=$(uploaded_versions "$version" <<<"$json")
 
 todo=("${releases[@]}")
