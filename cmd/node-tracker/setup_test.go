@@ -898,27 +898,57 @@ func TestNodeDownFor(t *testing.T) {
 	}
 }
 
-// As root, with no system bitcoind, setup points at a bitcoind run by a
-// user: to a user service for a cookie in the home, else to the cookie.
+// As root, with no system bitcoind, setup points at the bitcoinds run by
+// users and offers to stop, so that setup runs as that user.
 func TestSetupUserNodeHint(t *testing.T) {
-	const home = "bitcoind runs as alice, with the cookie in alice's home (/home/alice/.bitcoin/.cookie), which the system service can't read. Run 'node-tracker setup' as alice instead, without sudo"
-	const elsewhere = "bitcoind runs as bob, with the cookie /mnt/ssd/bitcoin/.cookie: give that as the cookie file. The system service runs as node-tracker, which must be able to read it.\n"
-	for _, euid := range []int{0, 1000} {
-		ctx, cancel := context.WithCancel(context.Background())
-		ft := newFakeTerm(t, turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", do: cancel})
-		h, _ := fakeSetup(t, newFakeTG(t), ft)
-		h.euid = euid
-		h.userNodes = func() []userNode {
-			return []userNode{{"alice", "/home/alice/.bitcoin/.cookie", true}, {"bob", "/mnt/ssd/bitcoin/.cookie", false},
-				{"carol", "/nonexistent-node-tracker-test/var/lib/bitcoind/.cookie", false}} // the one tried
-		}
-		runSetup(ctx, ft, "setup")
-		ft.done()
-		cancel()
-		out := ft.transcript()
-		if got := strings.Contains(out, home) && strings.Contains(out, elsewhere); got != (euid == 0) || strings.Contains(out, "carol") {
-			t.Errorf("euid %d: hints shown %v\n%s", euid, got, out)
-		}
+	const hint = "No system bitcoind answered at http://127.0.0.1:8332.\n" +
+		"bitcoind runs as \"alice\", cookie /home/alice/.bitcoin/.cookie.\n" +
+		"bitcoind runs as \"bob\", cookie /mnt/ssd/bitcoin/.cookie.\n" +
+		"Best fit: run 'node-tracker setup' as that user, without sudo, for a service of that user's own.\n"
+	const notes = "The system service can't read /home/alice/.bitcoin/.cookie: it is in the home of \"alice\".\n" +
+		"For the system service, give the cookie /mnt/ssd/bitcoin/.cookie; the node-tracker user must be able to read it.\n"
+	nodes := []userNode{{"alice", "http://127.0.0.1:8332", "/home/alice/.bitcoin/.cookie", true}, {"bob", "http://127.0.0.1:38332", "/mnt/ssd/bitcoin/.cookie", false},
+		{"carol", "http://127.0.0.1:8332", "/nonexistent-node-tracker-test/var/lib/bitcoind/.cookie", false}} // the one tried
+	for _, tt := range []struct {
+		name  string
+		euid  int
+		turns func(cancel func()) []turn
+		code  int
+		shown []string
+	}{
+		{"stop", 0, func(func()) []turn { return []turn{{prompt: "Stop here? [Y/n] "}} },
+			exitOK, []string{hint, "Stop here? [Y/n] \nStopped; nothing written.\n"}},
+		// The node with a cookie outside a home is the default.
+		{"go on", 0, func(cancel func()) []turn {
+			return []turn{{prompt: "Stop here? [Y/n] ", answer: "n"}, {prompt: "Node RPC URL [http://127.0.0.1:38332]: "},
+				{prompt: "Use bitcoind's cookie file for auth? [Y/n] "}, {prompt: "Cookie file [/mnt/ssd/bitcoin/.cookie]: ", do: cancel}}
+		}, exitFailure, []string{hint, notes}},
+		{"not root", 1000, func(cancel func()) []turn {
+			return []turn{{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", do: cancel}}
+		}, exitFailure, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ft := newFakeTerm(t, tt.turns(cancel)...)
+			h, _ := fakeSetup(t, newFakeTG(t), ft)
+			h.euid = tt.euid
+			h.userNodes = func() []userNode { return nodes }
+			code, _ := runSetup(ctx, ft, "setup")
+			ft.done()
+			out := ft.transcript()
+			if code != tt.code {
+				t.Errorf("exit code %d, want %d\n%s", code, tt.code, out)
+			}
+			for _, s := range tt.shown {
+				if !strings.Contains(out, s) {
+					t.Errorf("no %q in\n%s", s, out)
+				}
+			}
+			if strings.Contains(out, "carol") || tt.euid != 0 && strings.Contains(out, "bitcoind runs as") {
+				t.Errorf("wrong hints in\n%s", out)
+			}
+		})
 	}
 }
 
@@ -961,13 +991,13 @@ func TestUserNodes(t *testing.T) {
 		}
 		return &u, nil
 	}
-	want := []userNode{{"alice", alice, true}, {"alice", signet, false}}
+	want := []userNode{{"alice", "http://127.0.0.1:8332", alice, true}, {"alice", "http://127.0.0.1:38332", signet, false}}
 	if got := userNodes(proc, lookup); !slices.Equal(got, want) {
 		t.Errorf("userNodes = %v, want %v", got, want)
 	}
 	// A service account with the home "/": only its arguments count.
 	users[me] = user.User{Username: "svc", HomeDir: "/"}
-	if got, want := userNodes(proc, lookup), []userNode{{"svc", signet, false}}; !slices.Equal(got, want) {
+	if got, want := userNodes(proc, lookup), []userNode{{"svc", "http://127.0.0.1:38332", signet, false}}; !slices.Equal(got, want) {
 		t.Errorf("home /: userNodes = %v, want %v", got, want)
 	}
 	if got := userNodes(filepath.Join(proc, "missing"), lookup); got != nil {

@@ -66,6 +66,7 @@ var (
 
 	errInputEnded   = errors.New("input ended")
 	errDeclined     = errors.New("nothing written")
+	errRunAsUser    = errors.New("stopped to run setup as the user of bitcoind")
 	errTelegramDown = errors.New("could not check the token with Telegram")
 )
 
@@ -197,6 +198,9 @@ func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			}
 			fmt.Fprintln(stderr)
 			code = exitFailure
+		case errors.Is(err, errRunAsUser):
+			fmt.Fprintln(stdout, "Stopped; nothing written.")
+			code = exitOK
 		default:
 			fmt.Fprintf(stderr, "node-tracker: setup: %v\n", err)
 		}
@@ -421,9 +425,29 @@ func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local b
 			a.node = e
 			return h.Chain, true, err
 		}
-	} else {
+	} else if ns := w.otherUserNodes(d.CookieFile); len(ns) == 0 {
 		fmt.Fprintf(w.out, "No local bitcoind answered at %s with the cookie %s: %s\n", d.URL, d.CookieFile, explain.Node(ce, app.Proxy(ce) != "none", err))
-		w.userNodeHint(d.CookieFile)
+	} else {
+		fmt.Fprintf(w.out, "No system bitcoind answered at %s.\n", d.URL)
+		w.userNodeHint(ns)
+		stop, err := w.yes(ctx, "Stop here?", true)
+		if err != nil {
+			return "", false, err
+		}
+		if stop {
+			return "", false, errRunAsUser
+		}
+		found := false // the first node with a cookie outside a home is the default
+		for _, n := range ns {
+			if n.inHome {
+				fmt.Fprintf(w.out, "The system service can't read %s: it is in the home of %q.\n", n.cookie, n.user)
+				continue
+			}
+			fmt.Fprintf(w.out, "For the system service, give the cookie %s; the %s user must be able to read it.\n", n.cookie, service.Account)
+			if !found {
+				e.URL, e.CookieFile, found = n.url, n.cookie, true
+			}
+		}
 	}
 	for {
 		var pw config.Secret
@@ -1114,7 +1138,7 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 	case err != nil:
 		fmt.Fprintf(w.out, "warning: the node did not answer: %s\n", explain.Node(ce, app.Proxy(ce) != "none", err))
 		if o.nodeURL == "" && o.cookieFile == "" && o.rpcUser == "" {
-			w.userNodeHint(d.CookieFile)
+			w.userNodeHint(w.otherUserNodes(d.CookieFile))
 		}
 	default:
 		fmt.Fprintf(w.out, "node %s: %s\n", a.node.URL, heightInfo(h))
@@ -1477,29 +1501,42 @@ func (w *wizard) detect() config.Detected {
 	return env.Detect()
 }
 
-// userNodeHint tells root of a bitcoind run by a user, other than the one
-// at the cookie tried: the system service can't read a cookie in that
-// user's home (ProtectHome=yes), a service of that user's own can.
-func (w *wizard) userNodeHint(tried string) {
+// otherUserNodes are, as root, the bitcoinds run by users (see userNodes)
+// but the one at the cookie tried.
+func (w *wizard) otherUserNodes(tried string) []userNode {
 	if !w.root {
-		return
+		return nil
 	}
+	var ns []userNode
 	for _, n := range w.userNodes() {
-		switch {
-		case n.cookie == tried:
-		case n.inHome:
-			fmt.Fprintf(w.out, "bitcoind runs as %[1]s, with the cookie in %[1]s's home (%[2]s), which the system service can't read. "+
-				"Run 'node-tracker setup' as %[1]s instead, without sudo: that sets up a service of %[1]s's own, which finds the cookie itself.\n", n.user, n.cookie)
-		default:
-			fmt.Fprintf(w.out, "bitcoind runs as %s, with the cookie %s: give that as the cookie file. The system service runs as %s, which must be able to read it.\n", n.user, n.cookie, service.Account)
+		if n.cookie != tried {
+			ns = append(ns, n)
 		}
 	}
+	return ns
+}
+
+// userNodeHint tells root of the bitcoinds of ns and suggests a service of
+// that user's own: the system service runs as service.Account, which may
+// not read the cookie (ProtectHome=yes for one in the home).
+func (w *wizard) userNodeHint(ns []userNode) {
+	if len(ns) == 0 {
+		return
+	}
+	who := strconv.Quote(ns[0].user)
+	for _, n := range ns {
+		fmt.Fprintf(w.out, "bitcoind runs as %q, cookie %s.\n", n.user, n.cookie)
+		if n.user != ns[0].user {
+			who = "that user"
+		}
+	}
+	fmt.Fprintf(w.out, "Best fit: run 'node-tracker setup' as %s, without sudo, for a service of that user's own.\n", who)
 }
 
 // userNode is a bitcoind run by a user other than root, and its cookie.
 type userNode struct {
-	user, cookie string
-	inHome       bool // the cookie is in the user's home
+	user, url, cookie string // url: of its RPC, as detected
+	inHome            bool   // the cookie is in the user's home
 }
 
 // userNodes finds them in proc (Linux's /proc): the processes named
@@ -1542,8 +1579,9 @@ func userNodes(proc string, lookup func(uid string) (*user.User, error)) []userN
 		if f := strings.Split(strings.TrimRight(read("cmdline"), "\x00"), "\x00"); len(f) > 1 {
 			args = f[1:]
 		}
-		cookie := config.Env{Root: "/", Home: home, GOOS: runtime.GOOS, Args: args}.Detect().CookieFile
-		n := userNode{u.Username, cookie, home != "" && strings.HasPrefix(cookie, filepath.Clean(home)+string(filepath.Separator))}
+		det := config.Env{Root: "/", Home: home, GOOS: runtime.GOOS, Args: args}.Detect()
+		cookie := det.CookieFile
+		n := userNode{u.Username, det.URL, cookie, home != "" && strings.HasPrefix(cookie, filepath.Clean(home)+string(filepath.Separator))}
 		// Any process can be named bitcoind: only a regular file of its
 		// owner is a cookie, not e.g. -rpccookiefile=/etc/shadow.
 		fi, err := os.Stat(cookie)
