@@ -355,7 +355,12 @@ are set are used as they are.
   after a confirmation; the old config is kept as `.bak`, an old secret
   is not (it may be the one that leaked). As root, the config and its
   secrets go in `/etc/node-tracker`, where `install-service -system` takes
-  them from. Every answer goes through the
+  them from. If no system bitcoind answers, root's setup reads the name,
+  owner and arguments of other users' bitcoind processes in `/proc` to
+  point at their cookie. It never prints the arguments (they may hold
+  `-rpcpassword`), and shows a cookie path only if it is a regular file
+  owned by that process's user: any process can be named bitcoind. Every
+  answer goes through the
   config validation, and the whole config through `config.Load` before it
   is written. The chat id comes from a `/start` link with a random 16-byte
   code, matched exactly, so stale updates and other users can't inject a
