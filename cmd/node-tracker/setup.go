@@ -1558,21 +1558,21 @@ func (w *wizard) otherUserNodes(tried string) []userNode {
 	return ns
 }
 
-// userNodeHint tells root of the bitcoinds of ns and suggests a service of
-// that user's own: the system service runs as service.Account, which may
-// not read the cookie (ProtectHome=yes for one in the home).
+// userNodeHint tells root of the bitcoinds of ns and suggests a user
+// service: the system service runs as service.Account, which may not read
+// the cookie (ProtectHome=yes for one in the home).
 func (w *wizard) userNodeHint(ns []userNode) {
 	if len(ns) == 0 {
 		return
 	}
 	who := strconv.Quote(ns[0].user)
 	for _, n := range ns {
-		fmt.Fprintf(w.out, "bitcoind runs as %q, cookie %s.\n", n.user, n.cookie)
+		fmt.Fprintf(w.out, "bitcoind runs as user %q, with the cookie %s.\n", n.user, n.cookie)
 		if n.user != ns[0].user {
 			who = "that user"
 		}
 	}
-	fmt.Fprintf(w.out, "Best fit: run 'node-tracker setup' as %s, without sudo, for a service of that user's own.\n", who)
+	fmt.Fprintf(w.out, "Best fit: a user service. Run 'node-tracker setup' as %s, without sudo.\n", who)
 }
 
 // userNode is a bitcoind run by a user other than root, and its cookie.

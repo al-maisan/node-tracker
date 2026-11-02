@@ -903,9 +903,9 @@ func TestNodeDownFor(t *testing.T) {
 // users and offers to stop, so that setup runs as that user.
 func TestSetupUserNodeHint(t *testing.T) {
 	const hint = "No system bitcoind answered at http://127.0.0.1:8332.\n" +
-		"bitcoind runs as \"alice\", cookie /home/alice/.bitcoin/.cookie.\n" +
-		"bitcoind runs as \"bob\", cookie /mnt/ssd/bitcoin/.cookie.\n" +
-		"Best fit: run 'node-tracker setup' as that user, without sudo, for a service of that user's own.\n"
+		"bitcoind runs as user \"alice\", with the cookie /home/alice/.bitcoin/.cookie.\n" +
+		"bitcoind runs as user \"bob\", with the cookie /mnt/ssd/bitcoin/.cookie.\n" +
+		"Best fit: a user service. Run 'node-tracker setup' as that user, without sudo.\n"
 	const notes = "The system service can't read /home/alice/.bitcoin/.cookie: it is in the home of \"alice\".\n" +
 		"For the system service, give the cookie /mnt/ssd/bitcoin/.cookie; the node-tracker user must be able to read it.\n"
 	nodes := []userNode{{"alice", "http://127.0.0.1:8332", "/home/alice/.bitcoin/.cookie", true}, {"bob", "http://127.0.0.1:38332", "/mnt/ssd/bitcoin/.cookie", false},
