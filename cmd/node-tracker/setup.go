@@ -1201,17 +1201,14 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 
 // readSecret reads a secret file as config.Load does: trimmed, not empty.
 func readSecret(path string) (config.Secret, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxSecret+1))
+	b, err := fsx.ReadSmall(path, maxSecret)
 	switch s := strings.TrimSpace(string(b)); {
+	case errors.Is(err, fsx.ErrTooLarge):
+		return "", fmt.Errorf("%s: larger than %d bytes", path, maxSecret)
+	case errors.Is(err, fsx.ErrNotRegular):
+		return "", fmt.Errorf("%s: %w", path, err)
 	case err != nil:
 		return "", err
-	case len(b) > maxSecret:
-		return "", fmt.Errorf("%s: larger than %d bytes", path, maxSecret)
 	case s == "":
 		return "", fmt.Errorf("%s is empty", path)
 	default:

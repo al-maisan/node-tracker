@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/al-maisan/node-tracker/internal/fsx"
 )
 
 // Kinds known to the validator. Adding a kind means: list it here, validate
@@ -555,22 +557,18 @@ func resolveSecret(v *validator, p, file, env string) Secret {
 			v.badPath(p+"_file", file, "secret")
 			return ""
 		}
-		fi, err := os.Stat(file)
-		if err != nil {
-			v.errf(p+"_file", "%s", fileErr(file, err))
-			return ""
-		}
-		if fi.Size() > maxSecretSize {
+		b, err := fsx.ReadSmall(file, maxSecretSize)
+		switch {
+		case errors.Is(err, fsx.ErrTooLarge):
 			v.errf(p+"_file", "larger than %d bytes", maxSecretSize)
 			return ""
-		}
-		if fi.Mode().Perm()&0o007 != 0 { // group access is fine: a dedicated service group
-			v.warns = append(v.warns, fmt.Sprintf("%s_file: %s is accessible by others (mode %v); chmod o-rwx it", p, file, fi.Mode().Perm()))
-		}
-		b, err := os.ReadFile(file)
-		if err != nil {
+		case err != nil:
 			v.errf(p+"_file", "%s", fileErr(file, err))
 			return ""
+		}
+		// group access is fine: a dedicated service group
+		if fi, err := os.Stat(file); err == nil && fi.Mode().Perm()&0o007 != 0 {
+			v.warns = append(v.warns, fmt.Sprintf("%s_file: %s is accessible by others (mode %v); chmod o-rwx it", p, file, fi.Mode().Perm()))
 		}
 		s := strings.TrimSpace(string(b))
 		if s == "" {

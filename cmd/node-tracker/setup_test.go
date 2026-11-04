@@ -1056,3 +1056,26 @@ func TestSetupCheckServiceFirst(t *testing.T) {
 		}
 	}
 }
+
+// readSecret reads like config.Load: bounded, regular files only, trimmed.
+func TestReadSecret(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{"ok": " s3cret\n", "empty": "\n", "big": strings.Repeat("x", maxSecret+1)}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s, err := readSecret(filepath.Join(dir, "ok")); err != nil || s != "s3cret" {
+		t.Errorf("ok: %q, %v", s, err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(dir, "empty"): "is empty",
+		filepath.Join(dir, "big"):   "larger than 4096 bytes",
+		"/dev/zero":                 "/dev/zero: not a regular file",
+	} {
+		if _, err := readSecret(path); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v; want %q", path, err, want)
+		}
+	}
+}
