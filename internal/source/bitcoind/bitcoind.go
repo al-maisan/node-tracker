@@ -10,15 +10,18 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 
+	"github.com/al-maisan/node-tracker/internal/fsx"
 	"github.com/al-maisan/node-tracker/internal/httpx"
 	"github.com/al-maisan/node-tracker/internal/source"
 )
 
-const maxBody = 64 << 10 // getblockchaininfo is ~1-2 KiB
+const (
+	maxBody   = 64 << 10 // getblockchaininfo is ~1-2 KiB
+	maxCookie = 4 << 10  // "__cookie__:" and 64 hex digits
+)
 
 var chainRE = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 
@@ -139,13 +142,14 @@ func (c *Client) credentials() (user, pass string, err error) {
 	if c.auth.HideCookie {
 		shown = "(path not shown: it may be the secret itself)"
 	}
-	b, err := os.ReadFile(c.auth.CookieFile)
+	// Bounded and regular files only: the cookie's directory belongs to
+	// bitcoind's user, who must not be able to stall or exhaust us.
+	b, err := fsx.ReadSmall(c.auth.CookieFile, maxCookie)
 	if err != nil {
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			return "", "", fmt.Errorf("read cookie file %s: %w", shown, pe.Err)
+		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
+			err = pe.Err // the path may be the secret
 		}
-		return "", "", fmt.Errorf("read cookie file: %w", err)
+		return "", "", fmt.Errorf("read cookie file %s: %w", shown, err)
 	}
 	user, pass, ok := strings.Cut(strings.TrimSpace(string(b)), ":")
 	if !ok || user == "" || pass == "" {

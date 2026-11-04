@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/al-maisan/node-tracker/internal/fsx"
 	"github.com/al-maisan/node-tracker/internal/httpx"
 	"github.com/al-maisan/node-tracker/internal/source"
 )
@@ -114,6 +115,26 @@ func TestCookieAuth(t *testing.T) {
 	}
 	if h, err := c.Height(context.Background()); err != nil || h.Blocks != 7 {
 		t.Fatalf("got %+v, %v", h, err)
+	}
+}
+
+// The cookie's directory belongs to bitcoind's user: a cookie swapped for a
+// device or a huge file is an error, not a hang or an unbounded read.
+func TestCookieBounded(t *testing.T) {
+	srv := fakeNode(t, 200, `{"result":{"blocks":7,"headers":7}}`)
+	dir := t.TempDir()
+	zero, big := filepath.Join(dir, "zero"), filepath.Join(dir, "big")
+	if err := os.Symlink("/dev/zero", zero); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(big, []byte("u:"+strings.Repeat("p", maxCookie)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]error{zero: fsx.ErrNotRegular, big: fsx.ErrTooLarge} {
+		_, err := New("n", srv.URL, Auth{CookieFile: path}, httpx.NewClient()).Height(context.Background())
+		if !errors.Is(err, want) || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: err = %v; want %v naming the path", path, err, want)
+		}
 	}
 }
 
