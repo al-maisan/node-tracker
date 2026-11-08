@@ -324,7 +324,10 @@ are set are used as they are.
   - Secret files and the cookie (re-read on every call, from a directory
     bitcoind's user controls) are read only if they are regular files, and
     at most 4 KiB (`fsx.ReadSmall`): a device such as `/dev/zero`, a FIFO
-    or a huge file is an error, not a hang or an unbounded read.
+    or a huge file is an error, not a hang or an unbounded read. The type
+    is checked before the open, as opening some devices has effects, and
+    again on the open file (`fsx.OpenRegular`); setup's detection, which
+    may run as root, opens `bitcoin.conf` and cookies the same way.
   - Heights must parse and lie in `[0, 1e9]`.
   - Redirects are never followed.
   - Telegram messages are HTML-escaped, so node data can't inject markup.

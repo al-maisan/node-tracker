@@ -229,7 +229,7 @@ func TestPastedSecretNeverShown(t *testing.T) {
 		{"password env", node, auth + "      password_env: " + pw + "\n", pw, "targets[0].node.password_env: must be the name of an environment variable, not the secret itself (value not shown)"},
 		{"password env, valid name", node, auth + "      password_env: Xk3vQ9ZbLmT2wPq8RtYs\n", "Xk3vQ9ZbLmT2wPq8RtYs", "targets[0].node.password_env: the environment variable is not set or empty (name not shown: it may be the secret itself)"},
 		{"base64 password file", node, auth + "      password_file: kQ9/zX+bLmT2wPq8RtYs=\n", "kQ9/zX+bLmT2wPq8RtYs=", "targets[0].node.password_file: must be the path of a file holding the secret (absolute or ~/…), not the secret itself (value not shown)"},
-		{"absolute base64 password file", node, auth + "      password_file: /kQ9zX+bLmT2wPq8RtYs=\n", "kQ9zX+bLmT2wPq8RtYs=", "targets[0].node.password_file: open: no such file or directory (path not shown: it may be the secret itself)"},
+		{"absolute base64 password file", node, auth + "      password_file: /kQ9zX+bLmT2wPq8RtYs=\n", "kQ9zX+bLmT2wPq8RtYs=", "targets[0].node.password_file: stat: no such file or directory (path not shown: it may be the secret itself)"},
 		{"cookie file", node, "      cookie_file: " + cookie + "\n", cookie, "targets[0].node.cookie_file: must be the path of a file holding the cookie (absolute or ~/…), not the cookie itself (value not shown)"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -249,7 +249,7 @@ func TestPastedSecretNeverShown(t *testing.T) {
 	// still shown.
 	missing := filepath.Join(t.TempDir(), "token")
 	_, _, err := Load(write(t, strings.Replace(valid, "bot_token_file: TOKENFILE", "bot_token_file: "+missing, 1)))
-	if err == nil || !strings.Contains(err.Error(), "open "+missing+": no such file") {
+	if err == nil || !strings.Contains(err.Error(), "stat "+missing+": no such file") {
 		t.Fatalf("missing file in an existing dir: err = %v", err)
 	}
 	// Secret files are read bounded, and only if regular: /dev/zero reports

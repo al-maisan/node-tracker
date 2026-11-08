@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/al-maisan/node-tracker/internal/fsx"
 )
 
 // Chains, named as getblockchaininfo does.
@@ -192,8 +194,8 @@ func (e Env) Detect() Detected {
 		cookies = append(cookies, filepath.Join(c.datadir, chainInfo[d.Chain].subdir, ".cookie"))
 	}
 	d.CookieFile = cookies[0]
-	for _, c := range cookies {
-		if f, err := os.Open(c); err == nil {
+	for _, c := range cookies { // in a datadir bitcoind's user controls; setup may run as root
+		if f, err := fsx.OpenRegular(c); err == nil {
 			f.Close()
 			d.CookieFile = c
 			break
@@ -213,7 +215,7 @@ func firstReadable(cs []conf) (conf, []byte) {
 }
 
 func readSmall(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := fsx.OpenRegular(path)
 	if err != nil {
 		return nil, err
 	}

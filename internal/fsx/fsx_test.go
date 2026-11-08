@@ -71,3 +71,29 @@ func TestWriteFile(t *testing.T) {
 		t.Error("ReadRegular followed a symlink")
 	}
 }
+
+// OpenRegular refuses non-regular files before opening them: opening some
+// devices has effects, and a FIFO would block.
+func TestOpenRegular(t *testing.T) {
+	dir := t.TempDir()
+	file, fifo := filepath.Join(dir, "f"), filepath.Join(dir, "fifo")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := OpenRegular(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	for _, p := range []string{"/dev/null", fifo, dir} {
+		if f, err := OpenRegular(p); !errors.Is(err, ErrNotRegular) {
+			if f != nil {
+				f.Close()
+			}
+			t.Errorf("%s: err = %v; want ErrNotRegular", p, err)
+		}
+	}
+}
