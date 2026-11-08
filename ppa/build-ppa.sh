@@ -18,17 +18,92 @@ die() {
 	exit 1
 }
 
-# Reads Launchpad's getPublishedSources JSON on stdin; prints the package
-# versions uploaded for upstream <version>.
-uploaded_versions() {
+lp_api=https://api.launchpad.net/1.0/
+# Uploads sent from here: Launchpad lists one only after processing it,
+# minutes later.
+sent_log=${XDG_CACHE_HOME:-$HOME/.cache}/node-tracker/ppa-sent
+
+# Prints the JSON at <url> of Launchpad's API. no-cache: Launchpad's proxy
+# serves anonymous reads minutes stale, which hides a fresh upload; a cached
+# answer anyway (a HIT or an Age from any proxy layer) is an error.
+lp_page() {
+	local hdrs out cached
+	hdrs=$(mktemp) || return 1
+	out=$(curl -fsS --connect-timeout 10 --max-time 60 -H 'Cache-Control: no-cache' -D "$hdrs" "$1") || {
+		rm -f "$hdrs"
+		return 1
+	}
+	cached=$(grep -iE '^(x-cache: *hit|age: *[1-9])' "$hdrs" | tr -d '\r' | paste -sd' ')
+	rm -f "$hdrs"
+	if [[ -n $cached ]]; then
+		echo "build-ppa: Launchpad's proxy answered from its cache ($cached)" >&2
+		return 1
+	fi
+	echo "$out"
+}
+
+# Reads a getPublishedSources page on stdin; prints "<version> <status>"
+# per upload, then "next <url>" if there are more pages.
+page_records() {
 	python3 -I -c '
-import json, re, sys
-pat = re.compile(re.escape(sys.argv[1]) + r"-1ppa[0-9]+~[a-z]+[0-9]+$")
-for e in json.load(sys.stdin).get("entries", []):
-    v = e.get("source_package_version") or ""
-    if pat.match(v):
-        print(v)
-' "$1"
+import json, sys
+d = json.load(sys.stdin)
+for e in d["entries"]:
+    print(e.get("source_package_version") or "-", e.get("status") or "-")
+n = d.get("next_collection_link")
+if n:
+    if not n.startswith(sys.argv[1]):
+        sys.exit("unexpected next page: " + n)
+    print("next", n)
+' "$lp_api"
+}
+
+# Prints "<version> <status>" for every upload to the PPA, newest first.
+launchpad_records() {
+	local url=$lp_api"~$lp_owner/+archive/ubuntu/$lp_ppa?ws.op=getPublishedSources&source_name=node-tracker&exact_match=true&ws.size=300"
+	local page recs n
+	for ((n = 0; n < 20; n++)); do
+		page=$(lp_page "$url") || return 1
+		recs=$(page_records <<<"$page") || return 1
+		grep -v '^next ' <<<"$recs" || true
+		url=$(sed -n 's/^next //p' <<<"$recs")
+		[[ -n $url ]] || return 0
+	done
+	echo "build-ppa: more than $n pages of uploads" >&2
+	return 1
+}
+
+# Reads launchpad_records on stdin; prints the package versions uploaded for
+# upstream <version>. With "live", not the Deleted or Obsolete ones.
+uploaded_versions() {
+	local v s
+	while read -r v s; do
+		[[ $v =~ ^${1//./\\.}-1ppa[0-9]+~[a-z]+[0-9]+$ ]] || continue
+		[[ ${2:-} == live && ($s == Deleted || $s == Obsolete) ]] && continue
+		echo "$v"
+	done
+	return 0
+}
+
+# Prints the package versions of upstream <version> that took a revision:
+# every upload in <records> (Deleted too), and every send in <log>, which
+# Launchpad may never list (rejected, or still queued).
+taken_versions() {
+	{
+		echo "$2"
+		[[ ! -f $3 ]] || cat "$3"
+	} | uploaded_versions "$1"
+}
+
+# Prints the uploads in <log> sent less than an hour before <now> that are
+# not in <listed> (versions, one per line).
+unlisted_sent() {
+	local v t
+	[[ -f $1 ]] || return 0
+	while read -r v t; do
+		[[ $t =~ ^[0-9]+$ ]] && (($2 - t < 3600)) && ! grep -qxF "$v" <<<"$3" && echo "$v"
+	done <"$1"
+	return 0
 }
 
 # True if <uploaded> (from uploaded_versions) has a version for <release>.
@@ -58,14 +133,17 @@ version=${tag#v}
 commit=$(git -C "$src" rev-parse --short "$tag^{commit}")
 
 # Fail loudly: guessing "nothing uploaded" would build a new orig tarball,
-# which Launchpad rejects. Newest uploads come first.
-json=$(curl -fsS "https://api.launchpad.net/1.0/~$lp_owner/+archive/ubuntu/$lp_ppa?ws.op=getPublishedSources&source_name=node-tracker&exact_match=true&ws.size=300") ||
-	die "cannot ask Launchpad for the uploads"
-uploaded=$(uploaded_versions "$version" <<<"$json")
+# which Launchpad rejects.
+records=$(launchpad_records) || die "cannot ask Launchpad for the uploads"
+recent=$(unlisted_sent "$sent_log" "$(date +%s)" "$(cut -d' ' -f1 <<<"$records")")
+[[ -z $recent ]] || die "sent less than an hour ago and not listed by Launchpad yet: $(paste -sd' ' <<<"$recent"). Rerun once Launchpad lists it; after a rejection mail, delete its line in $sent_log"
+# A deleted upload still takes its revision, but doesn't count as uploaded.
+all=$(taken_versions "$version" "$records" "$sent_log")
+uploaded=$(uploaded_versions "$version" live <<<"$records")
 
 todo=("${releases[@]}")
 if [[ -z $rev ]]; then
-	rev=$(next_rev "$uploaded")
+	rev=$(next_rev "$all")
 	todo=()
 	for r in "${releases[@]}"; do
 		if uploaded_for "$r" "$uploaded"; then
@@ -88,7 +166,8 @@ orig=node-tracker_$version.orig.tar.gz
 # Launchpad keeps one orig tarball per version: a rebuild must reuse it.
 if [[ -n $uploaded ]]; then
 	echo "build-ppa: reusing the published $orig"
-	curl -fsSL -o "$build/$orig" "https://launchpad.net/~$lp_owner/+archive/ubuntu/$lp_ppa/+files/$orig"
+	curl -fsSL --connect-timeout 10 --max-time 600 -o "$build/$orig" "https://launchpad.net/~$lp_owner/+archive/ubuntu/$lp_ppa/+files/$orig" ||
+		die "cannot download the published $orig (not published yet? rerun later)"
 	# It gets signed again below: it must be exactly the tag's tarball.
 	"$src/scripts/src-tarball.sh" "$tag" "$build/local.tar.gz"
 	[[ $(sha256sum <"$build/$orig") == "$(sha256sum <"$build/local.tar.gz")" ]] ||
@@ -116,6 +195,9 @@ for r in "${todo[@]}"; do
 	"$src/scripts/pkg-changelog.sh" deb "$tag" "$full" "$r" >"$dir/debian/changelog"
 	# -d: the build dependencies are needed on Launchpad, not here.
 	(cd "$dir" && debuild -S "$include_orig" -d -k"$release_key")
+	# Logged before: a dput that fails after sending still counts.
+	mkdir -p "${sent_log%/*}"
+	echo "$full $(date +%s)" >>"$sent_log"
 	dput "ppa:$lp_owner/$lp_ppa" "$build/node-tracker_${full}_source.changes"
 done
 echo "build-ppa: uploaded; see https://launchpad.net/~$lp_owner/+archive/ubuntu/$lp_ppa/+packages"
