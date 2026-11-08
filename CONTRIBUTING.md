@@ -78,7 +78,10 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    signs it with the release key (two key touches per Ubuntu release).
    Ubuntu releases that already have the version are skipped; after a
    packaging fix, `make ppa PPA_REV=2` uploads the next revision with the
-   same orig tarball. The packaging (`ppa/debian`,
+   same orig tarball. Launchpad lists an upload only once it has
+   processed it, minutes later; until then, or an hour at most, `make ppa`
+   stops instead of uploading again, and a send it never lists keeps its
+   revision (`~/.cache/node-tracker/ppa-sent`). The packaging (`ppa/debian`,
    `scripts/install-units.sh`, `scripts/deb-layout.sh`,
    `deploy/sysusers.d`) comes from the checkout, so a fix also applies to
    older tags. The release `.deb` uses the same `deb-layout.sh` and a copy
