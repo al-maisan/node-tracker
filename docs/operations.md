@@ -443,6 +443,53 @@ than `for` does before `LAGGING`; `node-tracker setup` sets it for `.onion`
 nodes to about 5 minutes. A node that answers but is behind still alerts
 after `for`.
 
+### Faster recovery after the node's Tor restarts
+
+When Tor on the node restarts, its onion service moves to new
+introduction points. Tor on the monitoring host may keep using the address
+data it fetched before and fail to reach the node for an hour or more,
+although the node is fine. With `tor_control`, node-tracker tells the local
+Tor to drop that data (`SIGNAL NEWNYM`) as soon as the node is
+`NODE_DOWN`, and again every 30 minutes while it stays down. NEWNYM also
+gives new streams fresh circuits; it does not touch the node.
+
+```yaml
+node:
+  kind: bitcoind
+  url: http://abc…xyz.onion:8332
+  username: nodetracker
+  password_file: ~/.config/node-tracker/node-rpc-password
+  tor_control: unix:/run/tor/control
+```
+
+Debian and Ubuntu's Tor already has that control socket, with cookie
+authentication, for the group `debian-tor`. node-tracker asks Tor for the
+cookie file and logs in with `SAFECOOKIE`, so the cookie never crosses the
+socket. Give node-tracker's user that group:
+
+- user service: `sudo usermod -aG debian-tor "$USER"`, then
+  `sudo systemctl restart "user@$(id -u)"` (or reboot), so the user
+  manager gets the group;
+- system service:
+  `sudo mkdir -p /etc/systemd/system/node-tracker.service.d && printf '[Service]\nSupplementaryGroups=debian-tor\n' | sudo tee /etc/systemd/system/node-tracker.service.d/tor.conf && sudo systemctl daemon-reload && sudo systemctl restart node-tracker`
+  (for `-timer`: `node-tracker-once.service.d`, and no restart). Groups
+  from several drop-ins add up, so a `bitcoin` one can stay.
+  `install-service -system` checks that the service can open the socket
+  and read the cookie Tor names (Tor must be running), and prints the fix
+  if not.
+
+That group controls Tor fully, not only NEWNYM: any process of that user
+can change Tor's config (`SETCONF`), read its onion services' addresses,
+or stop it. A dedicated system service user keeps that to node-tracker; for
+a user service, every process of your account gets it.
+
+Elsewhere, set `ControlPort 9051` and `CookieAuthentication 1` in torrc and
+use `tor_control: 127.0.0.1:9051`; the cookie file must be readable by
+node-tracker's user. A control port that needs a password is not
+supported. `node-tracker check` logs in and reports `tor control ok`, or
+what failed; it sends no signal. It runs as you: as root it can't tell
+whether the service may log in.
+
 For Umbrel, StartOS, RaspiBlitz and myNode, see [Node boxes](node-boxes.md):
 it shows where each box keeps the RPC credentials and its onion address.
 

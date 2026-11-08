@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"os"
 	"strconv"
 	"text/tabwriter"
+	"time"
 
 	"github.com/al-maisan/node-tracker/internal/app"
 	"github.com/al-maisan/node-tracker/internal/config"
@@ -96,7 +99,11 @@ func checkWarns(ctx context.Context, m *monitor.Monitor, cfg *config.Config, war
 		}
 	}
 	for i, t := range cfg.Targets {
-		fmt.Fprintf(tw, "target %s\t%s\n", t.Name, targetVerdict(t, samples[i], res[i]))
+		v := targetVerdict(t, samples[i], res[i])
+		if tor := m.Targets[i].Tor; tor != nil {
+			v += " · " + torVerdict(ctx, tor, cfg.Timeout)
+		}
+		fmt.Fprintf(tw, "target %s\t%s\n", t.Name, v)
 	}
 	for _, n := range cfg.Notifiers {
 		fmt.Fprintf(tw, "notifier %s\t%s\n", n.Name, notifierVerdict(ctx, m, cfg, n.Name))
@@ -129,6 +136,23 @@ func targetVerdict(t config.Target, s health.Sample, r monitor.Result) string {
 		v += " · OK is the node's current state"
 	}
 	return v
+}
+
+// torVerdict tells whether node-tracker can log in to the Tor control port,
+// without sending it anything else.
+func torVerdict(ctx context.Context, tor monitor.Tor, timeout time.Duration) string {
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	err := tor.Check(cctx)
+	switch {
+	case err == nil && os.Geteuid() == 0:
+		return "tor control ok as root; install-service -system checks the service's own access"
+	case err == nil:
+		return "tor control ok"
+	case errors.Is(err, fs.ErrPermission):
+		return "tor control: " + explain.Printable(err.Error()) + " · join the group of Tor's control socket and cookie (Debian/Ubuntu: debian-tor)"
+	}
+	return "tor control: " + explain.Printable(err.Error())
 }
 
 func notifierVerdict(ctx context.Context, m *monitor.Monitor, cfg *config.Config, name string) string {

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"syscall"
+	"time"
 
 	"github.com/al-maisan/node-tracker/internal/health"
 	"github.com/al-maisan/node-tracker/internal/notify"
@@ -28,6 +29,9 @@ type Data struct {
 	Version int                      `json:"version"`
 	Targets map[string]health.Target `json:"targets"`
 	Outbox  []Pending                `json:"outbox"`
+	// Newnym holds, per target, when its Tor client was last told to drop
+	// cached onion service descriptors (NEWNYM). Only while NODE_DOWN.
+	Newnym map[string]time.Time `json:"newnym,omitempty"`
 }
 
 // Pending is an event that some notifiers still have to deliver.

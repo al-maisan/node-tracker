@@ -785,3 +785,40 @@ func TestTrackerName(t *testing.T) {
 		t.Fatalf("bad name: %v", err)
 	}
 }
+
+func TestTorControl(t *testing.T) {
+	onionNode := "url: http://" + onion + ":8332"
+	tests := []struct {
+		name, node, ctl, wantErr string
+	}{
+		{"unix socket", onionNode, "unix:/run/tor/control", ""},
+		{"loopback port", onionNode, "127.0.0.1:9051", ""},
+		{"not .onion", "url: http://127.0.0.1:8332", "unix:/run/tor/control", `targets[0].node.tor_control "unix:/run/tor/control": only for a .onion url`},
+		{"remote port", onionNode, "10.0.0.5:9051", `targets[0].node.tor_control "10.0.0.5:9051": host must be loopback`},
+		{"relative socket", onionNode, "unix:run/tor/control", "needs an absolute path"},
+		{"no port", onionNode, "127.0.0.1", "must be unix:/path or host:port"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _, err := Load(write(t, strings.Replace(valid, "url: http://127.0.0.1:8332", tt.node+"\n      tor_control: "+tt.ctl, 1)))
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.Targets[0].Node.TorControl; got != tt.ctl {
+				t.Fatalf("tor_control = %q", got)
+			}
+		})
+	}
+	t.Run("reference", func(t *testing.T) {
+		cfg := strings.Replace(valid, "url: https://mempool.space/api", "url: https://mempool.space/api\n        tor_control: unix:/run/tor/control", 1)
+		if _, _, err := Load(write(t, cfg)); err == nil || !strings.Contains(err.Error(), "references[0].tor_control: only the node may have one") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}

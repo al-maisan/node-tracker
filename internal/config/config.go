@@ -23,6 +23,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/al-maisan/node-tracker/internal/fsx"
+	"github.com/al-maisan/node-tracker/internal/torctl"
 )
 
 // Kinds known to the validator. Adding a kind means: list it here, validate
@@ -109,7 +110,8 @@ type Endpoint struct {
 	PasswordFile  string `yaml:"password_file,omitempty"`
 	PasswordEnv   string `yaml:"password_env,omitempty"`
 	AllowInsecure bool   `yaml:"allow_insecure,omitempty"`
-	Proxy         string `yaml:"proxy,omitempty"` // empty: from the environment; for .onion, DefaultTorProxy if the environment has none
+	Proxy         string `yaml:"proxy,omitempty"`       // empty: from the environment; for .onion, DefaultTorProxy if the environment has none
+	TorControl    string `yaml:"tor_control,omitempty"` // nodes on .onion: control port of the local Tor, sent NEWNYM while the node is down
 
 	Name         string        `yaml:"-"` // derived: kind:host
 	Password     Secret        `yaml:"-"` // resolved from PasswordFile / PasswordEnv
@@ -289,6 +291,9 @@ func (c *Config) validate(v *validator, env Env) {
 			r := &t.References[j]
 			rp := fmt.Sprintf("%s.references[%d]", p, j)
 			r.validate(v, rp, ReferenceKinds, c)
+			if r.TorControl != "" {
+				v.errf(rp+".tor_control", "only the node may have one")
+			}
 			if seen[r.URL] {
 				v.errf(rp+".url", "duplicate of the node or another reference")
 			}
@@ -365,6 +370,14 @@ func (e *Endpoint) validate(v *validator, p string, kinds []string, c *Config) {
 		// used for them too, and would see (and could change) the traffic.
 		// The environment's proxy skips loopback hosts.
 		v.bad(p+".proxy", e.Proxy, "plain http url needs a loopback proxy; this one would see the RPC credentials and heights. Use https, a local proxy, or allow_insecure: true if that network is trusted")
+	}
+
+	if e.TorControl != "" {
+		if !isOnion(u.Hostname()) {
+			v.bad(p+".tor_control", e.TorControl, "only for a .onion url: it makes the local Tor fetch the onion service's address data again")
+		} else if _, err := torctl.New(e.TorControl); err != nil {
+			v.bad(p+".tor_control", e.TorControl, "%v", err)
+		}
 	}
 
 	switch e.Kind {
