@@ -684,3 +684,75 @@ notifiers:
 		t.Fatalf("test-notify, default references: code=%d\n%s", code, errs)
 	}
 }
+
+// check logs in to the node's tor_control (NULL auth here) and sends no
+// signal; a control port that isn't there is reported.
+func TestCheckTorControl(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	dir, err := os.MkdirTemp("", "nt-tor") // short: sun_path is ~108 bytes
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "control")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var mu sync.Mutex
+	var cmds []string
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				for {
+					l, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					mu.Lock()
+					cmds = append(cmds, strings.TrimSpace(l))
+					mu.Unlock()
+					if strings.HasPrefix(l, "PROTOCOLINFO") {
+						fmt.Fprint(c, "250-PROTOCOLINFO 1\r\n250-AUTH METHODS=NULL\r\n250 OK\r\n")
+					} else {
+						fmt.Fprint(c, "250 OK\r\n")
+					}
+				}
+			}()
+		}
+	}()
+
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	socks := newSOCKS5(t, w.srv.Listener.Addr().String())
+	cfg, _ := w.config(t)
+	b, _ := os.ReadFile(cfg)
+	node := fmt.Sprintf("url: http://%s:8332/rpc, proxy: socks5://%s, tor_control: unix:%s", onion, socks.addr, sock)
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "url: "+w.srv.URL+"/rpc", node, 1)), 0o600)
+
+	code, out, errs := exec(t, "check", "-config", cfg)
+	if code != exitOK || !strings.Contains(out, " · OK is the node's current state · tor control ok\n") {
+		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
+	}
+	mu.Lock()
+	got := strings.Join(cmds, "|")
+	mu.Unlock()
+	if got != "PROTOCOLINFO 1|AUTHENTICATE|QUIT" {
+		t.Fatalf("control commands = %q", got)
+	}
+
+	b, _ = os.ReadFile(cfg)
+	os.WriteFile(cfg, []byte(strings.Replace(string(b), "unix:"+sock, "unix:"+sock+".gone", 1)), 0o600)
+	code, out, _ = exec(t, "check", "-config", cfg)
+	if code != exitOK || !strings.Contains(out, " · tor control: dial unix "+sock+".gone: connect: no such file or directory\n") {
+		t.Fatalf("missing socket: code=%d\n%s", code, out)
+	}
+}

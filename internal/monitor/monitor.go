@@ -17,6 +17,10 @@ import (
 	"github.com/al-maisan/node-tracker/internal/state"
 )
 
+// NewnymEvery is how often a NODE_DOWN target's Tor client is told again to
+// drop its cached onion service descriptors.
+const NewnymEvery = 30 * time.Minute
+
 // Target is one watched node.
 type Target struct {
 	Name   string
@@ -25,6 +29,14 @@ type Target struct {
 	Local  []bool // Local[i]: Refs[i] is on the node's host (health.Reading.Local); nil: none
 	Rule   health.Rule
 	Notify []string // notifier names
+	Tor    Tor      // the local Tor the .onion node is reached through; nil: none
+}
+
+// Tor is a Tor client's control port (torctl.Controller).
+type Tor interface {
+	Newnym(ctx context.Context) error
+	Check(ctx context.Context) error
+	String() string
 }
 
 // Monitor holds the wiring. All fields are required except Now.
@@ -130,6 +142,7 @@ func (m *Monitor) Tick(ctx context.Context, d *state.Data, deliverBy time.Durati
 		prev := d.Targets[t.Name]
 		next, alert := health.Step(prev, o.State, t.Rule, now)
 		d.Targets[t.Name] = next
+		m.newnym(ctx, d, t, prev.Current, next.Current, now)
 		if next.Current == prev.Current {
 			continue
 		}
@@ -147,6 +160,36 @@ func (m *Monitor) Tick(ctx context.Context, d *state.Data, deliverBy time.Durati
 	dctx, cancel := context.WithTimeout(ctx, deliverBy)
 	defer cancel()
 	return res, m.Deliver(dctx, d), nil
+}
+
+// newnym tells t's Tor client to drop its cached onion service descriptors
+// when t goes NODE_DOWN, and again every NewnymEvery while it stays down.
+// After the node's Tor restarts, its onion service has new introduction
+// points, and a client with the old descriptor can fail for hours. A failed
+// attempt waits NewnymEvery too, so a broken control port logs rarely.
+func (m *Monitor) newnym(ctx context.Context, d *state.Data, t Target, prev, next health.State, now time.Time) {
+	if t.Tor == nil || next != health.NodeDown {
+		delete(d.Newnym, t.Name)
+		return
+	}
+	last, ok := d.Newnym[t.Name]
+	if ctx.Err() != nil { // shutting down: an attempt now would only delay the next one
+		return
+	}
+	if prev == health.NodeDown && ok && now.Sub(last) < NewnymEvery && !now.Before(last) {
+		return
+	}
+	if d.Newnym == nil {
+		d.Newnym = map[string]time.Time{}
+	}
+	d.Newnym[t.Name] = now
+	cctx, cancel := context.WithTimeout(ctx, m.Timeout)
+	defer cancel()
+	if err := t.Tor.Newnym(cctx); err != nil {
+		m.Log.Warn("telling Tor to fetch onion addresses again (NEWNYM) failed", "target", t.Name, "tor_control", t.Tor.String(), "err", err)
+		return
+	}
+	m.Log.Info("told Tor to fetch onion addresses again (NEWNYM)", "target", t.Name, "tor_control", t.Tor.String())
 }
 
 // Deliver sends pending events and returns how many deliveries are still
@@ -243,6 +286,11 @@ func (m *Monitor) Prune(d *state.Data) {
 		if !slices.ContainsFunc(m.Targets, func(t Target) bool { return t.Name == name }) {
 			m.Log.Info("dropping state of removed target", "target", name)
 			delete(d.Targets, name)
+		}
+	}
+	for name := range d.Newnym {
+		if _, ok := d.Targets[name]; !ok {
+			delete(d.Newnym, name)
 		}
 	}
 	for i := range d.Outbox {

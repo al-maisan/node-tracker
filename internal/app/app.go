@@ -19,6 +19,7 @@ import (
 	"github.com/al-maisan/node-tracker/internal/source"
 	"github.com/al-maisan/node-tracker/internal/source/bitcoind"
 	"github.com/al-maisan/node-tracker/internal/source/esplora"
+	"github.com/al-maisan/node-tracker/internal/torctl"
 )
 
 // OutboxLimit caps undelivered alerts per notifier.
@@ -74,6 +75,13 @@ func Build(c *config.Config, log *slog.Logger) (*monitor.Monitor, error) {
 			Rule: health.Rule{Threshold: *t.Alert.Threshold, Recover: *t.Alert.RecoverThreshold,
 				For: t.Alert.For, DownFor: t.Alert.DownFor, Outlier: *t.ReferenceOutlier},
 			Notify: t.Notify,
+		}
+		if t.Node.TorControl != "" {
+			ctl, err := torctl.New(t.Node.TorControl)
+			if err != nil {
+				return nil, fmt.Errorf("target %s: tor_control: %w", t.Name, err)
+			}
+			mt.Tor = ctl
 		}
 		for _, r := range t.References {
 			s, err := NewSource(r, hc)

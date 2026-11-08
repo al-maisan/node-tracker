@@ -39,6 +39,10 @@ targets:
       # username + password_file. It goes through the local Tor at
       # socks5://127.0.0.1:9050 unless a proxy is set (docs/operations.md, Tor):
       # proxy: socks5://127.0.0.1:9050
+      # With the local Tor's control port, node-tracker makes Tor fetch the
+      # onion's address data again while the node is down (helps after the
+      # node's Tor restarts; docs/operations.md, Tor):
+      # tor_control: unix:/run/tor/control
 
     # Independent views of the chain tip. Use at least two you trust.
     # Optional; default: these two on mainnet, mempool.space on test

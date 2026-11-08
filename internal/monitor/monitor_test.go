@@ -317,3 +317,105 @@ func TestTrackerName(t *testing.T) {
 		t.Fatalf("got %q, want %q", rec.got, want)
 	}
 }
+
+type fakeTor struct {
+	at  []int // ticks of the NEWNYM calls
+	err error
+	t   *int
+}
+
+func (f *fakeTor) Newnym(context.Context) error { f.at = append(f.at, *f.t); return f.err }
+func (f *fakeTor) Check(context.Context) error  { return nil }
+func (f *fakeTor) String() string               { return "unix:/run/tor/control" }
+
+func TestNewnymWhileNodeDown(t *testing.T) {
+	// Ticks are 10 minutes apart. The node is down from tick 2 to 9; with
+	// for: 2 the state is NODE_DOWN from tick 3 to 10. NEWNYM goes out
+	// when it turns NODE_DOWN, then every 30 minutes, and stops when the
+	// node is back.
+	steps := []any{100, 100, errDown, errDown, errDown, errDown, errDown, errDown, errDown, errDown, 100, 100, 100}
+	want := []int{3, 6, 9}
+	newMon := func(tick *int, tor *fakeTor) *Monitor {
+		return &Monitor{
+			Targets: []Target{{
+				Name: "btc", Node: &script{name: "node", steps: steps, tick: tick}, Tor: tor,
+				Rule: health.Rule{Threshold: 3, Recover: 1, For: 2}, Notify: []string{"rec"},
+			}},
+			Notifiers:   map[string]notify.Notifier{"rec": &recorder{}},
+			Timeout:     time.Second,
+			Retry:       notify.Retry{Attempts: 1},
+			OutboxLimit: 10,
+			Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Now: func() time.Time {
+				return time.Date(2026, 11, 8, 6, 0, 0, 0, time.UTC).Add(time.Duration(*tick) * 10 * time.Minute)
+			},
+		}
+	}
+	for _, failing := range []bool{false, true} { // a failed attempt waits too
+		var tick int
+		daemon := &fakeTor{t: &tick}
+		if failing {
+			daemon.err = errors.New("permission denied")
+		}
+		m := newMon(&tick, daemon)
+		d := &state.Data{Targets: map[string]health.Target{}}
+		for tick = range len(steps) {
+			if _, _, err := m.Tick(context.Background(), d, time.Second); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !reflect.DeepEqual(daemon.at, want) {
+			t.Errorf("failing=%v: daemon NEWNYM at ticks %v, want %v", failing, daemon.at, want)
+		}
+		if len(d.Newnym) != 0 {
+			t.Errorf("failing=%v: newnym state kept after recovery: %v", failing, d.Newnym)
+		}
+	}
+
+	// once: the time of the last NEWNYM survives in the state file.
+	path := filepath.Join(t.TempDir(), "state.json")
+	var tick int
+	once := &fakeTor{t: &tick}
+	for tick = range len(steps) {
+		s, err := state.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := s.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := newMon(&tick, once).Tick(context.Background(), d, time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Save(d); err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+	if !reflect.DeepEqual(once.at, want) {
+		t.Errorf("once NEWNYM at ticks %v, want %v", once.at, want)
+	}
+}
+
+func TestNoNewnymWithoutTor(t *testing.T) {
+	var tick int
+	m := newMonitor(&tick, &recorder{})
+	d := &state.Data{Targets: map[string]health.Target{}}
+	for tick = range len(nodeSteps) {
+		m.Tick(context.Background(), d, time.Second)
+	}
+	if d.Targets["btc"].Current != health.NodeDown || d.Newnym != nil {
+		t.Fatalf("state = %v, newnym = %v", d.Targets["btc"].Current, d.Newnym)
+	}
+}
+
+func TestPruneDropsNewnymOfRemovedTarget(t *testing.T) {
+	var tick int
+	m := newMonitor(&tick, &recorder{})
+	d := &state.Data{Targets: map[string]health.Target{"gone": {}}, Newnym: map[string]time.Time{"gone": {}}}
+	m.Prune(d)
+	if len(d.Newnym) != 0 {
+		t.Fatalf("newnym = %v", d.Newnym)
+	}
+}

@@ -19,7 +19,9 @@ Later (the design must allow these without reshaping the core):
 - alerts: Slack, email, …
 
 Non-goals: dashboards, alert history storage, managing or restarting the
-node.
+node. The one action node-tracker takes besides alerting is on its own
+side: with `tor_control`, it tells the local Tor client to fetch a down
+`.onion` node's address data again (§6).
 
 ## 2. Key definitions
 
@@ -176,8 +178,9 @@ can't interleave. Both modes therefore behave the same, and a test checks
 that they send identical alerts.
 
 - **State file** (`state_file`, JSON) keeps, for each target: the current
-  state, the candidate state with its "seen N times in a row" counter, and
-  the time of the last change.
+  state, the candidate state with its "seen N times in a row" counter, the
+  time of the last change and, while `NODE_DOWN` with `tor_control`, the
+  time of the last NEWNYM.
   - Writes are atomic (temp file + `fsync` + `rename`), so a crash never
     leaves a half-written file.
   - A corrupt or unreadable file is a hard error, with a clear message. It is
@@ -280,6 +283,7 @@ internal/source/esplora/     Esplora REST
 internal/notify/             Message, Event, rendering, retry/backoff
 internal/notify/telegram/    Bot API
 internal/httpx/              hardened HTTP client, body limits, URL redaction
+internal/torctl/             Tor control port: authenticate, SIGNAL NEWNYM
 internal/explain/            plain-words causes of node, reference and Telegram errors (check, test-notify, setup, alerts)
 internal/service/            install-service: render, write and enable the units
 internal/fsx/                atomic file writes (install-service, setup)
@@ -343,6 +347,18 @@ are set are used as they are.
   without one use the environment's proxy, else Tor's
   `socks5://127.0.0.1:9050`, and a per-call timeout of at least 30s. Plain
   http to them needs no `allow_insecure` only through a loopback proxy.
+- **Tor control port** (`tor_control`, `.onion` nodes only): after the
+  node's Tor restarts, its onion service has new introduction points, and
+  a client that keeps the old descriptor can fail to reach it for hours.
+  While the node is `NODE_DOWN`, node-tracker sends `SIGNAL NEWNYM` (which
+  also drops cached descriptors) when the state changes, then every 30
+  minutes; the time is kept in the state file, so `once` behaves the same.
+  A failed attempt is logged and waits 30 minutes too. The control port
+  controls Tor, so it must be a unix socket or loopback. Authentication is
+  `NULL` or `SAFECOOKIE` only: the cookie file named by `PROTOCOLINFO` is
+  read with `fsx.ReadSmall` and never sent, and Tor must prove it knows it.
+  Replies are limited in line length and count. It is done in
+  `internal/torctl` with the standard library, not a dependency.
 - **Least privilege:**
   - The tool runs as an unprivileged user.
   - The system unit is hardened: empty capability set, `ProtectSystem=strict`,
