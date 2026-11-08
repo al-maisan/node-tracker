@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -721,5 +723,96 @@ func TestEnvSecretWarning(t *testing.T) {
 		if want := "notifiers[0].bot_token_env: the service does not get this shell's environment; use bot_token_file, or set the variable in a drop-in (" + edit + ": Environment= or EnvironmentFile=)"; !strings.Contains(e.out.String(), want) {
 			t.Errorf("system=%v: no %q in\n%s", system, want, e.out.String())
 		}
+	}
+}
+
+// fakeTorControl serves PROTOCOLINFO on a unix socket (mode 0660) and names
+// cookie as its cookie file. It returns the socket's path.
+func fakeTorControl(t *testing.T, cookie string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "nt-svc") // short: sun_path is ~108 bytes
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	mkdir(t, dir, 0o750)
+	sock := filepath.Join(dir, "control")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	os.Chmod(sock, 0o660)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				for {
+					l, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if strings.HasPrefix(l, "PROTOCOLINFO") {
+						fmt.Fprintf(c, "250-PROTOCOLINFO 1\r\n250-AUTH METHODS=COOKIE,SAFECOOKIE COOKIEFILE=%q\r\n250 OK\r\n", cookie)
+					} else {
+						fmt.Fprint(c, "250 OK\r\n")
+					}
+				}
+			}()
+		}
+	}()
+	return sock
+}
+
+func TestInstallSystemTorControl(t *testing.T) {
+	e := newEnv(t)
+	rootExe(t, e)
+	e.h.Euid = 0
+	src := filepath.Join(e.conf, "node-tracker", "config.yaml")
+	token := filepath.Join(e.h.EtcDir, "token")
+	torCookie := filepath.Join(filepath.Dir(e.cookie), "control.authcookie")
+	write(t, torCookie, strings.Repeat("x", 32), 0o640)
+	sock := fakeTorControl(t, torCookie)
+	install := func(ctl string) error {
+		cfg := strings.Replace(testConfig(token, e.cookie), `url: "http://127.0.0.1:8332", cookie_file: `+e.cookie,
+			`url: "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion:8332", username: u, password_file: `+token+`, tor_control: "`+ctl+`"`, 1)
+		write(t, src, cfg, 0o600)
+		return Install(context.Background(), e.h, Options{System: true, Config: src, DryRun: true})
+	}
+	g := groupName(os.Getgid())
+
+	// Not in the group of the socket: refused, with the fix.
+	e.h.AccountIDs = func() (int, []int, error) { return 99999, nil, nil }
+	err := install("unix:" + sock)
+	if !errors.As(err, new(UsageError)) || !strings.Contains(err.Error(), "the service can't open Tor's control socket "+sock+"; it runs as user node-tracker. To fix it:\n  1. sudo usermod -aG "+g+" node-tracker   (the group can control Tor fully") {
+		t.Fatalf("socket: err = %v", err)
+	}
+	// A drop-in's group lets it in, for the socket and the cookie.
+	dropIn(t, e, "node-tracker.service", "[Service]\nSupplementaryGroups=bitcoin\n") // the fake host maps bitcoin to the socket's group
+	if err := install("unix:" + sock); err != nil {
+		t.Fatalf("drop-in group: %v", err)
+	}
+	// The cookie must be readable too.
+	os.Chmod(torCookie, 0o600)
+	if err := install("unix:" + sock); err == nil || !strings.Contains(err.Error(), "can't read Tor's cookie "+torCookie+", not even in its group") {
+		t.Fatalf("cookie: err = %v", err)
+	}
+	os.Chmod(torCookie, 0o640)
+	// The timer's service has its own drop-ins.
+	e.h.AccountIDs = func() (int, []int, error) { return 99999, nil, nil }
+	if err := Install(context.Background(), e.h, Options{System: true, Timer: true, Config: src, DryRun: true}); err == nil || !strings.Contains(err.Error(), "control socket") {
+		t.Fatalf("timer without its drop-in: err = %v", err)
+	}
+	// Tor not running: it can't name the cookie, so install-service stops.
+	if err := install("unix:" + sock + ".gone"); err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("no socket: err = %v", err)
+	}
+	if err := install("127.0.0.1:1"); err == nil || !strings.Contains(err.Error(), "start Tor first") {
+		t.Fatalf("no Tor: err = %v", err)
 	}
 }

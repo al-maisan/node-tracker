@@ -278,3 +278,17 @@ func TestNew(t *testing.T) {
 		t.Error("zero Controller accepted")
 	}
 }
+
+func TestCookieFile(t *testing.T) {
+	f := &fakeTor{methods: "COOKIE,SAFECOOKIE", cookie: cookie()}
+	got, err := listen(t, f).CookieFile(ctx(t))
+	if err != nil || filepath.Base(got) != "control.authcookie" {
+		t.Fatalf("CookieFile = %q, %v", got, err)
+	}
+	if cmds := f.got(); strings.Join(cmds, "|") != "PROTOCOLINFO 1|QUIT" {
+		t.Fatalf("commands = %q", cmds)
+	}
+	if got, err := listen(t, &fakeTor{methods: "NULL,SAFECOOKIE", cookie: cookie()}).CookieFile(ctx(t)); err != nil || got != "" {
+		t.Fatalf("NULL: CookieFile = %q, %v", got, err)
+	}
+}

@@ -23,6 +23,7 @@ import (
 	"github.com/al-maisan/node-tracker/deploy"
 	"github.com/al-maisan/node-tracker/internal/config"
 	"github.com/al-maisan/node-tracker/internal/fsx"
+	"github.com/al-maisan/node-tracker/internal/torctl"
 )
 
 // Account is the system user and group of the system units.
@@ -252,6 +253,9 @@ func (in *installer) system(ctx context.Context, exe string) error {
 	if err := in.checkCookies(cfg); err != nil {
 		return err
 	}
+	if err := in.checkTor(ctx, cfg); err != nil {
+		return err
+	}
 	files := []file{cf}
 	for _, s := range secrets {
 		files = append(files, file{path: s, mode: 0o640, owned: true})
@@ -370,23 +374,9 @@ func secretFiles(cfg *config.Config, dir string) ([]string, error) {
 // needs read access through its user, its groups or SupplementaryGroups= in
 // a drop-in of the service. ACLs are not considered.
 func (in *installer) checkCookies(cfg *config.Config) error {
-	uid, gids, err := in.h.AccountIDs()
-	var unknown user.UnknownUserError
-	if errors.As(err, &unknown) {
-		uid, gids, err = -1, nil, nil // created later, with a new group
-	}
-	if err != nil {
-		return fmt.Errorf("user %s: %w", Account, err)
-	}
-	svc := serviceName(in.o.Timer)
-	groups, err := dropInGroups(filepath.Join(in.h.SystemUnitDir, svc+".d"))
+	uid, gids, err := in.serviceIDs()
 	if err != nil {
 		return err
-	}
-	for _, g := range groups {
-		if gid, err := in.h.LookupGroup(g); err == nil {
-			gids = append(gids, gid)
-		}
 	}
 	for _, e := range endpoints(cfg) {
 		if e.CookieFile == "" {
@@ -423,6 +413,111 @@ func (in *installer) checkCookies(cfg *config.Config) error {
 		return cookieError(e.CookieFile, uid, gids, gid)
 	}
 	return nil
+}
+
+// serviceIDs are the uid and groups the system service runs with: Account's
+// and the SupplementaryGroups= of its drop-ins. uid is -1 if Account does not
+// exist yet.
+func (in *installer) serviceIDs() (uid int, gids []int, err error) {
+	uid, gids, err = in.h.AccountIDs()
+	var unknown user.UnknownUserError
+	if errors.As(err, &unknown) {
+		uid, gids, err = -1, nil, nil // created later, with a new group
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("user %s: %w", Account, err)
+	}
+	groups, err := dropInGroups(filepath.Join(in.h.SystemUnitDir, serviceName(in.o.Timer)+".d"))
+	if err != nil {
+		return 0, nil, err
+	}
+	for _, g := range groups {
+		if gid, err := in.h.LookupGroup(g); err == nil {
+			gids = append(gids, gid)
+		}
+	}
+	return uid, gids, nil
+}
+
+// checkTor makes sure the system service can use every tor_control: open a
+// unix control socket, and read the cookie file Tor names. Else NEWNYM would
+// fail only once the node is down, which install-service's caller, often
+// root, would not notice. Tor must be running: it names the cookie file.
+func (in *installer) checkTor(ctx context.Context, cfg *config.Config) error {
+	var uid int
+	var gids []int
+	loaded := false
+	for _, t := range cfg.Targets {
+		if t.Node.TorControl == "" {
+			continue
+		}
+		c, err := torctl.New(t.Node.TorControl)
+		if err != nil {
+			return err
+		}
+		if !loaded {
+			if uid, gids, err = in.serviceIDs(); err != nil {
+				return err
+			}
+			loaded = true
+		}
+		if sock, ok := c.Socket(); ok {
+			if err := torAccess(sock, 2, "open Tor's control socket", uid, gids); err != nil {
+				return err
+			}
+		}
+		cctx, cancel := context.WithTimeout(ctx, config.DefaultTimeout)
+		cookie, err := c.CookieFile(cctx)
+		cancel()
+		if err != nil {
+			return usagef("%s: tor_control %s: %v; start Tor first, so the service's access can be checked", t.Name, c, err)
+		}
+		if cookie != "" {
+			if err := torAccess(cookie, 4, "read Tor's cookie", uid, gids); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// torAccess tells, as commands, how to give the service account (uid, gids;
+// uid -1: not created yet) need access (2 write, 4 read) to Tor's path.
+// That group (debian-tor on Debian/Ubuntu) can control Tor fully, not only
+// send NEWNYM.
+func torAccess(path string, need fs.FileMode, what string, uid int, gids []int) error {
+	bs, gid, err := blockersNeed(path, need, uid, gids)
+	if err != nil {
+		return usagef("tor_control: %s %s: %v", what, path, err)
+	}
+	if len(bs) == 0 {
+		return nil
+	}
+	g := groupName(gid)
+	joined := append(slices.Clone(gids), gid)
+	if bs, _, err = blockersNeed(path, need, uid, joined); err != nil {
+		return err
+	}
+	var fixes []string
+	if uid == -1 {
+		fixes = append(fixes, "sudo useradd "+strings.Join(useradd, " "))
+	}
+	if !slices.Contains(gids, gid) {
+		fixes = append(fixes, "sudo usermod -aG "+g+" "+Account+"   (the group can control Tor fully, not only send NEWNYM)")
+	}
+	for _, x := range bs {
+		if !x.dir {
+			return usagef("the service can't %s %s, not even in its group %s (mode %04o); check Tor's config", what, path, g, x.perm)
+		}
+		_, fix := dirFix(x, uid, joined)
+		fixes = append(fixes, fix)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "the service can't %s %s; it runs as user %s. To fix it:", what, path, Account)
+	for i, f := range fixes {
+		fmt.Fprintf(&b, "\n  %d. %s", i+1, f)
+	}
+	return usagef("%s", b.String())
 }
 
 // useradd are the arguments that create Account, with its own group.
@@ -471,13 +566,18 @@ type blocker struct {
 // blockers lists every part of path, where its symlinks lead, that uid with
 // gids can't get through, and returns the file's group.
 func blockers(path string, uid int, gids []int) ([]blocker, int, error) {
+	return blockersNeed(path, 4, uid, gids)
+}
+
+// blockersNeed is blockers for need access to the file: 4 read, 2 write.
+func blockersNeed(path string, need fs.FileMode, uid int, gids []int) ([]blocker, int, error) {
 	p, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil, 0, err
 	}
 	var bs []blocker
 	gid := -1
-	for q, need := p, fs.FileMode(4); ; q, need = filepath.Dir(q), 1 {
+	for q := p; ; q, need = filepath.Dir(q), 1 {
 		fi, err := os.Stat(q)
 		if err != nil {
 			return nil, 0, err

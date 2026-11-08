@@ -357,7 +357,10 @@ are set are used as they are.
   controls Tor, so it must be a unix socket or loopback. Authentication is
   `NULL` or `SAFECOOKIE` only: the cookie file named by `PROTOCOLINFO` is
   read with `fsx.ReadSmall` and never sent, and Tor must prove it knows it.
-  Replies are limited in line length and count. It is done in
+  Replies are limited in line length and count. `install-service
+  -system` checks that the service account can open the socket and read
+  the cookie, as for `cookie_file`, since `check` often runs as root. The
+  group that grants it (`debian-tor`) controls Tor fully. It is done in
   `internal/torctl` with the standard library, not a dependency.
 - **Least privilege:**
   - The tool runs as an unprivileged user.

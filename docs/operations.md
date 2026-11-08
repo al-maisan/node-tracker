@@ -472,14 +472,23 @@ socket. Give node-tracker's user that group:
   manager gets the group;
 - system service:
   `sudo mkdir -p /etc/systemd/system/node-tracker.service.d && printf '[Service]\nSupplementaryGroups=debian-tor\n' | sudo tee /etc/systemd/system/node-tracker.service.d/tor.conf && sudo systemctl daemon-reload && sudo systemctl restart node-tracker`
-  (with `bitcoin` too, if it needs that: one line
-  `SupplementaryGroups=bitcoin debian-tor`).
+  (for `-timer`: `node-tracker-once.service.d`, and no restart). Groups
+  from several drop-ins add up, so a `bitcoin` one can stay.
+  `install-service -system` checks that the service can open the socket
+  and read the cookie Tor names (Tor must be running), and prints the fix
+  if not.
+
+That group controls Tor fully, not only NEWNYM: any process of that user
+can change Tor's config (`SETCONF`), read its onion services' addresses,
+or stop it. A dedicated system service user keeps that to node-tracker; for
+a user service, every process of your account gets it.
 
 Elsewhere, set `ControlPort 9051` and `CookieAuthentication 1` in torrc and
 use `tor_control: 127.0.0.1:9051`; the cookie file must be readable by
 node-tracker's user. A control port that needs a password is not
 supported. `node-tracker check` logs in and reports `tor control ok`, or
-what failed; it sends no signal.
+what failed; it sends no signal. It runs as you: as root it can't tell
+whether the service may log in.
 
 For Umbrel, StartOS, RaspiBlitz and myNode, see [Node boxes](node-boxes.md):
 it shows where each box keeps the RPC credentials and its onion address.

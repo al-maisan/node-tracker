@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"os"
 	"strconv"
 	"text/tabwriter"
 	"time"
@@ -144,6 +145,8 @@ func torVerdict(ctx context.Context, tor monitor.Tor, timeout time.Duration) str
 	defer cancel()
 	err := tor.Check(cctx)
 	switch {
+	case err == nil && os.Geteuid() == 0:
+		return "tor control ok as root; install-service -system checks the service's own access"
 	case err == nil:
 		return "tor control ok"
 	case errors.Is(err, fs.ErrPermission):

@@ -67,12 +67,29 @@ func New(addr string) (Controller, error) {
 	return Controller{"tcp", addr}, nil
 }
 
+// Socket is the path of a unix control socket.
+func (c Controller) Socket() (string, bool) { return c.addr, c.network == "unix" }
+
 // String is the address as configured.
 func (c Controller) String() string {
 	if c.network == "unix" {
 		return "unix:" + c.addr
 	}
 	return c.addr
+}
+
+// CookieFile asks Tor which cookie file it authenticates with, without
+// authenticating; "" if Tor allows NULL authentication.
+func (c Controller) CookieFile(ctx context.Context) (string, error) {
+	var file string
+	err := c.session(ctx, func(s *session) error {
+		info, err := s.protocolInfo()
+		if err == nil && !slices.Contains(info.methods, "NULL") {
+			file = info.cookieFile
+		}
+		return err
+	})
+	return file, err
 }
 
 // Check connects and authenticates, and changes nothing.
@@ -84,6 +101,20 @@ func (c Controller) Check(ctx context.Context) error { return c.do(ctx, "") }
 func (c Controller) Newnym(ctx context.Context) error { return c.do(ctx, "SIGNAL NEWNYM") }
 
 func (c Controller) do(ctx context.Context, cmd string) error {
+	return c.session(ctx, func(s *session) error {
+		if err := s.auth(); err != nil {
+			return err
+		}
+		if cmd != "" {
+			_, err := s.call(cmd)
+			return err
+		}
+		return nil
+	})
+}
+
+// session connects, runs f and says QUIT if f succeeded.
+func (c Controller) session(ctx context.Context, f func(*session) error) error {
 	if c.network == "" {
 		return errors.New("no control address")
 	}
@@ -100,13 +131,8 @@ func (c Controller) do(ctx context.Context, cmd string) error {
 		return err
 	}
 	s := &session{w: conn, r: bufio.NewReaderSize(conn, maxLine)}
-	if err := s.auth(); err != nil {
+	if err := f(s); err != nil {
 		return err
-	}
-	if cmd != "" {
-		if _, err := s.call(cmd); err != nil {
-			return err
-		}
 	}
 	s.call("QUIT") // best effort; the close ends the session anyway
 	return nil
@@ -157,33 +183,45 @@ func (s *session) call(cmd string) ([]string, error) {
 // never sends the cookie and checks that the other end knows it too.
 // COOKIE and HASHEDPASSWORD alone are not supported.
 func (s *session) auth() error {
-	lines, err := s.call("PROTOCOLINFO 1")
+	info, err := s.protocolInfo()
 	if err != nil {
 		return err
 	}
-	var methods []string
-	var cookieFile string
+	switch {
+	case slices.Contains(info.methods, "NULL"):
+		_, err := s.call("AUTHENTICATE")
+		return err
+	case slices.Contains(info.methods, "SAFECOOKIE") && info.cookieFile != "":
+		return s.safeCookie(info.cookieFile)
+	}
+	return fmt.Errorf("%w: Tor offers %q; enable CookieAuthentication 1 in torrc", ErrAuth, strings.Join(info.methods, ","))
+}
+
+type protocolInfo struct {
+	methods    []string
+	cookieFile string
+}
+
+func (s *session) protocolInfo() (protocolInfo, error) {
+	var info protocolInfo
+	lines, err := s.call("PROTOCOLINFO 1")
+	if err != nil {
+		return info, err
+	}
 	for _, l := range lines {
 		rest, ok := strings.CutPrefix(l, "AUTH METHODS=")
 		if !ok {
 			continue
 		}
 		m, file, _ := strings.Cut(rest, " ")
-		methods = strings.Split(m, ",")
+		info.methods = strings.Split(m, ",")
 		if q, ok := strings.CutPrefix(file, "COOKIEFILE="); ok {
-			if cookieFile, err = strconv.Unquote(q); err != nil {
-				return errors.New("PROTOCOLINFO: malformed COOKIEFILE")
+			if info.cookieFile, err = strconv.Unquote(q); err != nil {
+				return info, errors.New("PROTOCOLINFO: malformed COOKIEFILE")
 			}
 		}
 	}
-	switch {
-	case slices.Contains(methods, "NULL"):
-		_, err := s.call("AUTHENTICATE")
-		return err
-	case slices.Contains(methods, "SAFECOOKIE") && cookieFile != "":
-		return s.safeCookie(cookieFile)
-	}
-	return fmt.Errorf("%w: Tor offers %q; enable CookieAuthentication 1 in torrc", ErrAuth, strings.Join(methods, ","))
+	return info, nil
 }
 
 func (s *session) safeCookie(file string) error {
