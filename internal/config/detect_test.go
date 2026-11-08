@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
 // fakeEnv is a machine under a temp dir: root holds /etc and /var, home is
 // root/home/u. files maps paths ("~/" for home) to contents; a "!" prefix
-// makes the file unreadable.
+// makes the file unreadable, and "|" makes it a FIFO.
 func fakeEnv(t *testing.T, goos string, vars map[string]string, files map[string]string) Env {
 	t.Helper()
 	root := t.TempDir()
@@ -27,6 +28,12 @@ func fakeEnv(t *testing.T, goos string, vars map[string]string, files map[string
 		}
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
+		}
+		if data == "|" { // opening it for reading would block
+			if err := syscall.Mkfifo(p, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			continue
 		}
 		if err := os.WriteFile(p, []byte(data), mode); err != nil {
 			t.Fatal(err)
@@ -80,6 +87,10 @@ func TestDetect(t *testing.T) {
 			Detected{"/etc/bitcoin/bitcoin.conf", ChainMain, "http://127.0.0.1:8332", "/nope/.cookie"}},
 		{"unreadable conf skipped", "linux", nil, map[string]string{"~/.bitcoin/bitcoin.conf": "!signet=1\n", "/etc/bitcoin/bitcoin.conf": "testnet4=1\n"},
 			Detected{"/etc/bitcoin/bitcoin.conf", ChainTestnet4, "http://127.0.0.1:48332", "/var/lib/bitcoind/testnet4/.cookie"}},
+		{"FIFO conf and cookie skipped, no hang", "linux", nil, map[string]string{
+			"~/.bitcoin/bitcoin.conf": "|", "~/.bitcoin/signet/.cookie": "|",
+			"/etc/bitcoin/bitcoin.conf": "signet=1\n", "/var/lib/bitcoind/signet/.cookie": cookie,
+		}, Detected{"/etc/bitcoin/bitcoin.conf", ChainSignet, "http://127.0.0.1:38332", "/var/lib/bitcoind/signet/.cookie"}},
 		{"BITCOIN_DATADIR first", "linux", map[string]string{"BITCOIN_DATADIR": "/mnt/ssd/bitcoin"}, map[string]string{
 			"/mnt/ssd/bitcoin/bitcoin.conf": "signet=1\n", "~/.bitcoin/bitcoin.conf": "regtest=1\n",
 		}, Detected{"/mnt/ssd/bitcoin/bitcoin.conf", ChainSignet, "http://127.0.0.1:38332", "/mnt/ssd/bitcoin/signet/.cookie"}},

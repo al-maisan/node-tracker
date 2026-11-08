@@ -252,6 +252,16 @@ func TestPastedSecretNeverShown(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stat "+missing+": no such file") {
 		t.Fatalf("missing file in an existing dir: err = %v", err)
 	}
+	// Secret files are read bounded, and only if regular: /dev/zero reports
+	// size 0 but never ends, and a FIFO would block.
+	big := filepath.Join(t.TempDir(), "big")
+	os.WriteFile(big, []byte(strings.Repeat("x", maxSecretSize+1)), 0o600)
+	for path, want := range map[string]string{"/dev/zero": "not a regular file", big: "larger than 4096 bytes"} {
+		_, _, err = Load(write(t, strings.Replace(valid, "bot_token_file: TOKENFILE", "bot_token_file: "+path, 1)))
+		if err == nil || !strings.Contains(err.Error(), "bot_token_file: "+want) {
+			t.Errorf("%s: err = %v; want %q", path, err, want)
+		}
+	}
 	_, _, err = Load(write(t, strings.Replace(valid, "bot_token_file: TOKENFILE", "bot_token_env: NT_NO_SUCH_VAR", 1)))
 	if err == nil || !strings.Contains(err.Error(), "environment variable NT_NO_SUCH_VAR is not set or empty") {
 		t.Fatalf("env name: err = %v", err)

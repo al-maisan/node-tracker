@@ -1,10 +1,51 @@
 package fsx
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
+
+func TestReadSmall(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cookie")
+	if err := os.WriteFile(file, []byte("1234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(file, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/zero", filepath.Join(dir, "zero")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		max  int64
+		want error // nil: reads "1234"
+	}{
+		{"cookie", 4, nil},
+		{"link", 4, nil}, // a symlink to a regular file is fine
+		{"cookie", 3, ErrTooLarge},
+		{"zero", 4 << 10, ErrNotRegular}, // reports size 0, never ends
+		{"fifo", 4 << 10, ErrNotRegular}, // must not block in open
+		{".", 4 << 10, ErrNotRegular},
+		{"missing", 4 << 10, fs.ErrNotExist},
+	} {
+		b, err := ReadSmall(filepath.Join(dir, c.name), c.max)
+		switch {
+		case c.want == nil && (err != nil || string(b) != "1234"):
+			t.Errorf("%s: %q, %v; want \"1234\"", c.name, b, err)
+		case c.want != nil && !errors.Is(err, c.want):
+			t.Errorf("%s (max %d): %v; want %v", c.name, c.max, err, c.want)
+		}
+	}
+}
 
 func TestWriteFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "secret")
@@ -28,5 +69,31 @@ func TestWriteFile(t *testing.T) {
 	os.Symlink(p, p+".link")
 	if _, err := ReadRegular(p + ".link"); err == nil {
 		t.Error("ReadRegular followed a symlink")
+	}
+}
+
+// OpenRegular refuses non-regular files before opening them: opening some
+// devices has effects, and a FIFO would block.
+func TestOpenRegular(t *testing.T) {
+	dir := t.TempDir()
+	file, fifo := filepath.Join(dir, "f"), filepath.Join(dir, "fifo")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := OpenRegular(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	for _, p := range []string{"/dev/null", fifo, dir} {
+		if f, err := OpenRegular(p); !errors.Is(err, ErrNotRegular) {
+			if f != nil {
+				f.Close()
+			}
+			t.Errorf("%s: err = %v; want ErrNotRegular", p, err)
+		}
 	}
 }
