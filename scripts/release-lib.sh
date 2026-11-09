@@ -43,3 +43,15 @@ oci_digest() {
 	fi
 	echo "${digests[0]}"
 }
+
+# Prints the version of the Homebrew formula <file> (e.g. 1.4.0), or nothing
+# if it has none.
+formula_version() {
+	sed -n 's/^  version "\([0-9][0-9A-Za-z.-]*\)"$/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+# True if the tap may get <tag> while it has <version> ("" for none): it
+# never moves back, e.g. for a fix release of an older version.
+brew_newer() {
+	[[ -z $2 ]] || [[ $(printf 'v%s\n%s\n' "$2" "$1" | highest_stable_tag) == "$1" ]]
+}

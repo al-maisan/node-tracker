@@ -6,7 +6,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.
 TAG        ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null)
 RPM_DIR    := $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/node-tracker/rpmbuild
 
-.PHONY: build dist image push-image test-image doc-version release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
+.PHONY: build dist image push-image brew test-image doc-version release ppa gen-spec srpm copr publish test test-ppa test-copr integration lint vuln clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/node-tracker ./cmd/node-tracker
@@ -58,6 +58,11 @@ srpm:
 copr:
 	scripts/copr-build.sh '$(TAG)'
 
+# Publishes the Homebrew formula of the stable release TAG to the tap, from
+# the release's signed SHA256SUMS; make release runs it.
+brew:
+	scripts/push-brew.sh '$(TAG)'
+
 publish: release ppa copr
 
 test:
@@ -70,6 +75,7 @@ test-ppa:
 	scripts/install-units_test.sh
 	scripts/deb_test.sh
 	scripts/push-image_test.sh
+	scripts/push-brew_test.sh
 	scripts/doc-version_test.sh
 
 test-copr:

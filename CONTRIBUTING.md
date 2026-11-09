@@ -52,12 +52,19 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    (`scripts/deb.sh`), so the release machine needs `dpkg-deb` (Fedora:
    `sudo dnf install dpkg`).
 4. For a stable release (no `-PRE`), `make release` also writes the
-   Homebrew formula `dist/node-tracker.rb` (`scripts/brew-formula.sh`) and
-   prints a one-liner that commits it to `Formula/node-tracker.rb` in
-   `al-maisan/homebrew-tap`. Check the formula, then run the one-liner.
+   Homebrew formula `dist/node-tracker.rb` (`scripts/brew-formula.sh`)
+   before the GitHub release, so a broken formula stops it. After the
+   release it runs `make brew` (`scripts/push-brew.sh`): that writes the
+   formula again from the release's `SHA256SUMS`, checked against the
+   release key, and commits it as `node-tracker vX.Y.Z` to
+   `Formula/node-tracker.rb` in `al-maisan/homebrew-tap` and pushes, if it
+   differs. A fix release of an older version leaves the tap alone. The
+   commit follows your git config (signed if `commit.gpgsign` is set: one
+   key touch). If only this fails, fix the cause and run
+   `make brew TAG=vX.Y.Z`; it can be rerun at any time.
    It also builds the container image from the linux archives
    (`scripts/image.sh`, to `dist/image`) before the GitHub release. Last,
-   after the formula step is printed, it runs `make push-image`
+   after the formula, it runs `make push-image`
    (`scripts/push-image.sh`): that rebuilds the image from the linux
    archives of the GitHub release, checked against its signed
    `SHA256SUMS`, pushes it to `ghcr.io/al-maisan/node-tracker` as
@@ -98,7 +105,7 @@ A new command or flag also goes into the man page, `node-tracker.1`;
    COPR API token in `~/.config/copr` but no key touch. It also needs
    `rpmbuild`.
 
-`make publish` runs `release`, `ppa` and `copr`.
+`make publish` runs `release` (with Homebrew and the image), `ppa` and `copr`.
 
 The package changelogs list the commits since the previous GitHub release,
 so run `make ppa` and `make copr` after `make release`.
