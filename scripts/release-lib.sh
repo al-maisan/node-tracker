@@ -50,6 +50,20 @@ formula_version() {
 	sed -n 's/^  version "\([0-9][0-9A-Za-z.-]*\)"$/\1/p' "$1" 2>/dev/null | head -n 1
 }
 
+# Prints the version of the tap's formula <file>, or nothing if there is no
+# formula yet. A formula whose version can't be read is an error: the tap
+# must not be treated as empty, which would skip brew_newer's check.
+tap_version() {
+	[[ -e $1 ]] || return 0
+	local v
+	v=$(formula_version "$1")
+	if [[ -z $v ]]; then
+		echo "can't read the version of the tap's formula $1" >&2
+		return 1
+	fi
+	echo "$v"
+}
+
 # True if the tap may get <tag> while it has <version> ("" for none): it
 # never moves back, e.g. for a fix release of an older version.
 brew_newer() {

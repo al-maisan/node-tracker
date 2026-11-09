@@ -35,7 +35,7 @@ scripts/brew-formula.sh "$tag" "$repo" "$tmp" >/dev/null
 
 git clone --quiet --depth 1 "https://github.com/$tap.git" "$tmp/tap" || die "cloning $tap failed"
 f=$tmp/tap/Formula/node-tracker.rb
-have=$(formula_version "$f")
+have=$(tap_version "$f") || die "fix Formula/node-tracker.rb in $tap first"
 brew_newer "$tag" "$have" || {
 	echo "push-brew: $tap has $have, newer than $tag, so it stays"
 	exit 0

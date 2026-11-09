@@ -24,6 +24,12 @@ check "formula url" 1 "$(grep -c 'url "https://github.com/al-maisan/node-tracker
 check "no formula without SHA256SUMS" no "$("$dir/scripts/brew-formula.sh" v1.4.0 al-maisan/node-tracker "$tmp/none" >/dev/null 2>&1 && echo yes || echo no)"
 check "no version in a missing formula" "" "$(formula_version "$tmp/missing.rb")"
 
+tapv() { tap_version "$1" 2>/dev/null || echo fails; }
+printf 'class NodeTracker < Formula\n  version "x"\nend\n' >"$tmp/bad.rb"
+check "tap version" 1.4.0 "$(tapv "$tmp/node-tracker.rb")"
+check "no formula in the tap yet" "" "$(tapv "$tmp/missing.rb")"
+check "unreadable tap version fails" fails "$(tapv "$tmp/bad.rb")"
+
 newer() { if brew_newer "$@"; then echo yes; else echo no; fi; }
 check "empty tap" yes "$(newer v1.4.0 "")"
 check "newer release" yes "$(newer v1.4.0 1.3.2)"
