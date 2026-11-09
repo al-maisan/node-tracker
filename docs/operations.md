@@ -487,15 +487,17 @@ Elsewhere, set `ControlPort 9051` and `CookieAuthentication 1` in torrc and
 use `tor_control: 127.0.0.1:9051`; the cookie file must be readable by
 node-tracker's user. A control port that needs a password is not
 supported. `node-tracker check` logs in and reports `tor control ok`, or
-what failed; it sends no signal.
-
-`node-tracker setup` offers it for a `.onion` node when it finds
-`/run/tor/control` (default: no). Run as your user, it logs in first and
-writes `tor_control` only if that works; otherwise it prints the
-`usermod` line and leaves it out. As root, it checks before writing that
-the system service may open the socket and read the cookie. With
-`-non-interactive`, give `-tor-control unix:/run/tor/control`. It runs as you: as root it can't tell
+what failed; it sends no signal. It runs as you: as root it can't tell
 whether the service may log in.
+
+`node-tracker setup` offers it for a `.onion` node reached through Tor's
+default SOCKS port, when it finds `/run/tor/control` (default: no). Run
+as your user, it logs in first and writes `tor_control` only if that
+works; otherwise it prints the `usermod` line and leaves it out. As root,
+it checks before writing that the system service may open the socket and
+read the cookie. With `-non-interactive`, give
+`-tor-control unix:/run/tor/control`. A node behind another proxy, e.g.
+Tor Browser's port 9150, needs the control port of that Tor (9151).
 
 For Umbrel, StartOS, RaspiBlitz and myNode, see [Node boxes](node-boxes.md):
 it shows where each box keeps the RPC credentials and its onion address.

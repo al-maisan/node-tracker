@@ -1094,13 +1094,16 @@ func TestAskTorControl(t *testing.T) {
 		root, denied           bool
 		want                   string // tor_control written
 		says                   string // in the transcript
+		proxy                  string // of the node
 	}{
-		{"not onion", "http://127.0.0.1:8332", "unix:" + sock, "", false, false, "", ""},
-		{"no socket", onion, "unix:" + sock + ".gone", "", false, false, "", ""},
-		{"declined", onion, "unix:" + sock, "", false, false, "", "It needs the group "},
-		{"accepted", onion, "unix:" + sock, "y", false, false, "unix:" + sock, "Logging in to Tor: ok\n"},
-		{"no access", onion, "unix:" + sock, "y", false, true, "", "Logging in to Tor failed: dial unix " + sock + ": connect: permission denied\nJoin the group: sudo usermod -aG "},
-		{"root", onion, "unix:" + sock, "y", true, true, "unix:" + sock, ""},
+		{"not onion", "http://127.0.0.1:8332", "unix:" + sock, "", false, false, "", "", ""},
+		{"another Tor", onion, "unix:" + sock, "", false, false, "", "", "socks5://127.0.0.1:9150"},
+		{"default Tor written out", onion, "unix:" + sock, "y", false, false, "unix:" + sock, "Logging in to Tor: ok\n", "socks5h://localhost:9050"},
+		{"no socket", onion, "unix:" + sock + ".gone", "", false, false, "", "", ""},
+		{"declined", onion, "unix:" + sock, "", false, false, "", "It needs the group ", ""},
+		{"accepted", onion, "unix:" + sock, "y", false, false, "unix:" + sock, "Logging in to Tor: ok\n", ""},
+		{"no access", onion, "unix:" + sock, "y", false, true, "", "Logging in to Tor failed: dial unix " + sock + ": connect: permission denied\nJoin the group: sudo usermod -aG ", ""},
+		{"root", onion, "unix:" + sock, "y", true, true, "unix:" + sock, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1116,7 +1119,7 @@ func TestAskTorControl(t *testing.T) {
 				defer os.Chmod(sock, 0o755)
 			}
 			w := &wizard{setupHost: *h, out: ft, root: tt.root, done: make(chan struct{})}
-			a := &answers{node: config.Endpoint{Kind: config.KindBitcoind, URL: tt.url}}
+			a := &answers{node: config.Endpoint{Kind: config.KindBitcoind, URL: tt.url, Proxy: tt.proxy}}
 			err := w.askTorControl(context.Background(), a)
 			close(w.done)
 			out := ft.transcript()
@@ -1170,6 +1173,13 @@ func TestSetupNonInteractiveTorControl(t *testing.T) {
 			t.Errorf("%s: code=%d\n%s", flag, code, errs)
 		}
 	}
+	// Another proxy is another Tor: written, as asked, with a warning.
+	out.Reset()
+	other := append(slices.Clone(args), "-force", "-tor-control", "unix:"+sock)
+	other[slicesIndex(other, "-proxy")+1] = "socks5://" + newSOCKS5(t, w.srv.Listener.Addr().String()).addr
+	if code, errs := runSetup(context.Background(), &out, other...); code != exitOK || !strings.Contains(out.String(), "warning: the node goes through socks5://") {
+		t.Errorf("another proxy: code=%d\n%s\n%s", code, out.String(), errs)
+	}
 	local := append(slices.Clone(args), "-tor-control", "unix:"+sock)
 	local[slicesIndex(local, "-node-url")+1] = w.srv.URL + "/rpc"
 	if code, errs := runSetup(context.Background(), io.Discard, local...); code != exitUsage || !strings.Contains(errs, "-tor-control: only for a .onion node") {
@@ -1196,5 +1206,16 @@ func TestSetupCheckServiceTor(t *testing.T) {
 	}
 	if !strings.Contains(out, "Before anything is written: The service can't open Tor's control socket /run/tor/control;") {
 		t.Errorf("transcript:\n%s", out)
+	}
+}
+
+func TestDefaultTor(t *testing.T) {
+	for proxy, want := range map[string]bool{
+		"": true, "socks5://127.0.0.1:9050": true, "socks5h://localhost:9050": true,
+		"socks5://127.0.0.1:9150": false, "socks5://10.0.0.2:9050": false, "http://127.0.0.1:9050": false,
+	} {
+		if got := defaultTor(proxy); got != want {
+			t.Errorf("defaultTor(%q) = %v", proxy, got)
+		}
 	}
 }

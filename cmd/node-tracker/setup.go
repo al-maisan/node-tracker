@@ -613,14 +613,14 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 	return e, config.Secret(pw), err
 }
 
-// testNode calls getblockchaininfo on e with password pw. It also returns e
-// as validated, for the hints.
-// askTorControl offers tor_control for a .onion node if the local Tor has
-// its control socket at w.torControl. The default is no: the socket's group
-// controls Tor fully. As a user, it is kept only if logging in works now;
-// as root, checkService checks the service's own access before writing.
+// askTorControl offers tor_control for a .onion node reached through the
+// local Tor's default SOCKS port, if that Tor has its control socket at
+// w.torControl. Another proxy is another Tor, whose descriptors NEWNYM on
+// this one would not drop. The default is no: the socket's group controls
+// Tor fully. As a user, it is kept only if logging in works now; as root,
+// checkService checks the service's own access before writing.
 func (w *wizard) askTorControl(ctx context.Context, a *answers) error {
-	if !explain.IsOnion(a.node.URL) {
+	if !explain.IsOnion(a.node.URL) || !defaultTor(a.node.Proxy) {
 		return nil
 	}
 	ctl, err := torctl.New(w.torControl)
@@ -652,6 +652,16 @@ func (w *wizard) askTorControl(ctx context.Context, a *answers) error {
 	return nil
 }
 
+// defaultTor reports whether proxy, a node's as written ("": the default
+// for .onion), is the local Tor's default SOCKS port.
+func defaultTor(proxy string) bool {
+	if proxy == "" {
+		return true
+	}
+	u, err := url.Parse(proxy)
+	return err == nil && strings.HasPrefix(u.Scheme, "socks5") && (u.Host == "127.0.0.1:9050" || u.Host == "localhost:9050")
+}
+
 func (w *wizard) checkTor(ctx context.Context, ctl torctl.Controller) error {
 	cctx, cancel := context.WithTimeout(ctx, config.DefaultTimeout)
 	defer cancel()
@@ -671,6 +681,8 @@ func socketGroup(fi fs.FileInfo) string {
 	return id
 }
 
+// testNode calls getblockchaininfo on e with password pw. It also returns e
+// as validated, for the hints.
 func (w *wizard) testNode(ctx context.Context, e config.Endpoint, pw config.Secret) (source.Height, config.Endpoint, error) {
 	e.Password = pw
 	ce, _, err := config.CheckEndpoint(e, "node", config.NodeKinds)
@@ -1209,6 +1221,8 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 			return nil, fmt.Errorf("-tor-control %q: %v", o.torControl, err)
 		case !explain.IsOnion(a.node.URL):
 			return nil, errors.New("-tor-control: only for a .onion node")
+		case !defaultTor(a.node.Proxy):
+			fmt.Fprintf(w.out, "warning: the node goes through %s; -tor-control must be the control port of that same Tor, else NEWNYM does nothing\n", httpx.Origin(a.node.Proxy))
 		}
 		if !w.root { // as root, checkService checks the service's access
 			if err := w.checkTor(ctx, ctl); err != nil {
