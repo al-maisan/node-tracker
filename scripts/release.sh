@@ -70,12 +70,11 @@ gh release create "$tag" --repo "$repo" --verify-tag --title "$tag" --generate-n
 	dist/*.tar.gz "${debs[@]}" dist/SHA256SUMS dist/SHA256SUMS.asc
 
 if [[ $tag != *-* ]]; then
-	tap=${repo%%/*}/homebrew-tap
-	echo "release: publish the formula to $tap:"
-	# shellcheck disable=SC2016 # prints a command: $d is the reader's
-	printf 'd=$(mktemp -d) && git clone https://github.com/%s.git "$d" && mkdir -p "$d/Formula" && cp %q "$d/Formula/" && git -C "$d" add Formula/node-tracker.rb && git -C "$d" commit -m "node-tracker %s" && git -C "$d" push\n' \
-		"$tap" "$PWD/dist/node-tracker.rb" "$tag"
-	# Last: the release is out, so a failed push only needs a rerun of this.
-	scripts/push-image.sh "$tag" ||
-		die "the image push failed, the rest of the release is done; fix the cause, then run: make push-image TAG=$tag"
+	# Last: the release is out, so a failed push only needs a rerun of that
+	# step. A failed formula does not stop the image.
+	redo=()
+	scripts/push-brew.sh "$tag" || redo+=("make brew TAG=$tag")
+	scripts/push-image.sh "$tag" || redo+=("make push-image TAG=$tag")
+	((${#redo[@]} == 0)) ||
+		die "the rest of the release is done, but a publishing step failed (see above); fix the cause, then run: $(printf '%s; ' "${redo[@]}")"
 fi
