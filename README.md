@@ -45,7 +45,7 @@ the alerts look like this:
 |---|---|
 | Ubuntu 26.04 | `sudo add-apt-repository ppa:al-maisan/node-tracker && sudo apt install node-tracker` |
 | Fedora | `sudo dnf copr enable al-maisan/node-tracker && sudo dnf install node-tracker` |
-| Debian, Raspberry Pi OS | the `.deb` from the [releases](https://github.com/al-maisan/node-tracker/releases): `sudo apt install ./node-tracker_1.4.0-1_arm64.deb` |
+| Debian, Raspberry Pi OS | the `.deb` from the [releases](https://github.com/al-maisan/node-tracker/releases): `sudo apt install ./node-tracker_1.5.0-1_arm64.deb` |
 | macOS, Linux | `brew install al-maisan/tap/node-tracker` |
 | Container | `ghcr.io/al-maisan/node-tracker`, with [deploy/compose](deploy/compose) |
 | Go 1.26+ | `go install github.com/al-maisan/node-tracker/cmd/node-tracker@latest` |
