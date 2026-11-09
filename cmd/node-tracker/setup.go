@@ -40,6 +40,7 @@ import (
 	"github.com/al-maisan/node-tracker/internal/source"
 	"github.com/al-maisan/node-tracker/internal/source/bitcoind"
 	"github.com/al-maisan/node-tracker/internal/term"
+	"github.com/al-maisan/node-tracker/internal/torctl"
 )
 
 // presets are the alert presets of docs/configuration.md.
@@ -80,7 +81,9 @@ type setupHost struct {
 	etcDir      string                      // config and secrets of the system service
 	group       func() (gid int, err error) // of service.Account
 	install     func(ctx context.Context, out io.Writer, o service.Options) error
-	cookies     func(cfg *config.Config) error // service.CheckCookies
+	cookies     func(cfg *config.Config) error                      // service.CheckCookies
+	torAccess   func(ctx context.Context, cfg *config.Config) error // service.CheckTor
+	torControl  string                                              // Tor's control socket offered for .onion nodes
 	hostname    func() (string, error)
 	userNodes   func() []userNode // bitcoinds run by users, see userNodes
 	telegramAPI string
@@ -104,6 +107,8 @@ var newSetupHost = func() setupHost {
 			return service.Install(ctx, service.NewHost(out, out), o)
 		},
 		cookies:     func(cfg *config.Config) error { return service.CheckCookies(sh, cfg) },
+		torAccess:   func(ctx context.Context, cfg *config.Config) error { return service.CheckTor(ctx, sh, cfg) },
+		torControl:  config.DefaultTorControl,
 		hostname:    os.Hostname,
 		userNodes:   func() []userNode { return userNodes("/proc", user.LookupId) },
 		telegramAPI: config.DefaultTelegramAPI,
@@ -118,6 +123,7 @@ var newSetupHost = func() setupHost {
 type setupOptions struct {
 	config, name, nodeURL, cookieFile, rpcUser, rpcPasswordFile string
 	proxy, references, preset, tokenFile, chatID, telegramProxy string
+	torControl                                                  string
 	nonInteractive, allowInsecure, installService, force        bool
 	downFor                                                     int // 0: see answers.downFor
 	trackerName                                                 string
@@ -143,6 +149,7 @@ func setupCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&o.rpcUser, "rpc-user", "", "RPC username, instead of the cookie")
 	fs.StringVar(&o.rpcPasswordFile, "rpc-password-file", "", "file holding the password of -rpc-user")
 	fs.StringVar(&o.proxy, "proxy", "", "proxy for the node, e.g. socks5://127.0.0.1:9150 (default: from the environment; for .onion "+config.DefaultTorProxy+")")
+	fs.StringVar(&o.torControl, "tor-control", "", "for a .onion node: the local Tor's control port, e.g. "+config.DefaultTorControl+"; NEWNYM while the node is down (default: none)")
 	fs.BoolVar(&o.allowInsecure, "allow-insecure", false, "allow plain http to a node that is not loopback or .onion (trusted LAN)")
 	fs.StringVar(&o.references, "references", "", "Esplora API URLs, comma-separated, or none (default: the public ones of the node's chain)")
 	fs.StringVar(&o.preset, "preset", presets[defaultPreset].name, "alert preset: fast, balanced or quiet")
@@ -371,6 +378,9 @@ func (w *wizard) interview(ctx context.Context, path string) (*answers, error) {
 	fmt.Fprintln(w.out, "\n1. The node")
 	chain, local, err := w.askNode(ctx, a)
 	if err != nil {
+		return nil, err
+	}
+	if err := w.askTorControl(ctx, a); err != nil {
 		return nil, err
 	}
 	for def := defaultName(local, w.hostname); ; {
@@ -605,6 +615,62 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 
 // testNode calls getblockchaininfo on e with password pw. It also returns e
 // as validated, for the hints.
+// askTorControl offers tor_control for a .onion node if the local Tor has
+// its control socket at w.torControl. The default is no: the socket's group
+// controls Tor fully. As a user, it is kept only if logging in works now;
+// as root, checkService checks the service's own access before writing.
+func (w *wizard) askTorControl(ctx context.Context, a *answers) error {
+	if !explain.IsOnion(a.node.URL) {
+		return nil
+	}
+	ctl, err := torctl.New(w.torControl)
+	if err != nil {
+		return err
+	}
+	sock, _ := ctl.Socket()
+	fi, err := os.Stat(sock)
+	if err != nil || fi.Mode()&fs.ModeSocket == 0 {
+		return nil
+	}
+	group := socketGroup(fi)
+	fmt.Fprintf(w.out, "Tor's control socket is at %s. With it, node-tracker makes Tor fetch the node's onion address data again while the node is down, which helps after the node's Tor restarts (tor_control). It needs the group %s, which controls Tor fully, not only this.\n", sock, group)
+	if ok, err := w.yes(ctx, "Use Tor's control socket?", false); err != nil || !ok {
+		return err
+	}
+	if !w.root {
+		if err := w.checkTor(ctx, ctl); err != nil {
+			fmt.Fprintf(w.out, "Logging in to Tor failed: %s\n", explain.Printable(err.Error()))
+			if errors.Is(err, fs.ErrPermission) {
+				fmt.Fprintf(w.out, "Join the group: sudo usermod -aG %s \"$USER\". It applies after you log in again, and for the user service after its user manager restarts (a reboot does it). Then run setup again, or add tor_control: %s to the node in the config.\n", group, ctl)
+			}
+			fmt.Fprintln(w.out, "tor_control is left out.")
+			return nil
+		}
+		fmt.Fprintln(w.out, "Logging in to Tor: ok")
+	}
+	a.node.TorControl = ctl.String()
+	return nil
+}
+
+func (w *wizard) checkTor(ctx context.Context, ctl torctl.Controller) error {
+	cctx, cancel := context.WithTimeout(ctx, config.DefaultTimeout)
+	defer cancel()
+	return ctl.Check(cctx)
+}
+
+// socketGroup is the name of fi's group, else its number.
+func socketGroup(fi fs.FileInfo) string {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "of the socket"
+	}
+	id := strconv.FormatUint(uint64(st.Gid), 10)
+	if g, err := user.LookupGroupId(id); err == nil {
+		return g.Name
+	}
+	return id
+}
+
 func (w *wizard) testNode(ctx context.Context, e config.Endpoint, pw config.Secret) (source.Height, config.Endpoint, error) {
 	e.Password = pw
 	ce, _, err := config.CheckEndpoint(e, "node", config.NodeKinds)
@@ -1136,6 +1202,22 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 	if p := effectiveProxy(ce); explain.IsOnion(ce.URL) && a.node.Proxy == "" && p != config.DefaultTorProxy {
 		a.node.Proxy = p
 	}
+	if o.torControl != "" {
+		ctl, err := torctl.New(o.torControl)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("-tor-control %q: %v", o.torControl, err)
+		case !explain.IsOnion(a.node.URL):
+			return nil, errors.New("-tor-control: only for a .onion node")
+		}
+		if !w.root { // as root, checkService checks the service's access
+			if err := w.checkTor(ctx, ctl); err != nil {
+				return nil, fmt.Errorf("-tor-control %s: logging in to Tor failed: %v", ctl, explain.Printable(err.Error()))
+			}
+			fmt.Fprintln(w.out, "tor control: ok")
+		}
+		a.node.TorControl = ctl.String()
+	}
 	h, _, err := w.height(ctx, ce)
 	switch {
 	case err != nil:
@@ -1353,7 +1435,11 @@ func (w *wizard) checkService(ctx context.Context, a *answers) error {
 	if !w.root || w.goos == "darwin" {
 		return nil
 	}
-	err := w.cookies(&config.Config{Targets: []config.Target{{Name: a.name, Node: a.node, References: a.refs}}})
+	cfg := &config.Config{Targets: []config.Target{{Name: a.name, Node: a.node, References: a.refs}}}
+	err := w.cookies(cfg)
+	if err == nil {
+		err = w.torAccess(ctx, cfg)
+	}
 	var ue service.UsageError
 	if !errors.As(err, &ue) {
 		return err
@@ -1461,7 +1547,7 @@ func (w *wizard) offerService(ctx context.Context, path string, root, replaced b
 		later = "sudo " + cmdline
 	}
 	if w.noSvc {
-		fmt.Fprintf(w.out, "Once the service can read the cookie (see above), install it: %s\n", later)
+		fmt.Fprintf(w.out, "Once the service has the access it lacks (see above), install it: %s\n", later)
 		return exitOK, nil
 	}
 	ok := w.o.installService

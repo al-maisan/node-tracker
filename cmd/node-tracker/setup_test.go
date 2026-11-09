@@ -208,6 +208,8 @@ func fakeSetup(t *testing.T, tg *fakeTG, ft *fakeTerm) (h *setupHost, installs *
 			return nil
 		},
 		cookies:     func(*config.Config) error { return nil },
+		torAccess:   func(context.Context, *config.Config) error { return nil },
+		torControl:  "unix:" + filepath.Join(t.TempDir(), "no-tor", "control"),
 		hostname:    func() (string, error) { return "orendil.example.org", nil },
 		userNodes:   func() []userNode { return nil },
 		telegramAPI: tg.srv.URL,
@@ -1048,7 +1050,7 @@ func TestSetupCheckServiceFirst(t *testing.T) {
 		switch {
 		case install && (code != exitUsage || !strings.Contains(errs, "-install-service: the service can't read bitcoind's cookie") || statErr == nil):
 			t.Errorf("-install-service: code %d, config written %v\n%s", code, statErr == nil, errs)
-		case !install && (code != exitOK || statErr != nil || !strings.Contains(out.String(), "Once the service can read the cookie (see above), install it: sudo node-tracker install-service -system\n")):
+		case !install && (code != exitOK || statErr != nil || !strings.Contains(out.String(), "Once the service has the access it lacks (see above), install it: sudo node-tracker install-service -system\n")):
 			t.Errorf("no -install-service: code %d, config %v\n%s\n%s", code, statErr, out.String(), errs)
 		}
 		if len(*installs) != 0 {
@@ -1077,5 +1079,122 @@ func TestReadSecret(t *testing.T) {
 		if _, err := readSecret(path); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v; want %q", path, err, want)
 		}
+	}
+}
+
+// tor_control is offered only for a .onion node whose host has Tor's
+// control socket, defaults to no, and as a user is kept only if logging in
+// works; as root the service's access is checked later (checkService).
+func TestAskTorControl(t *testing.T) {
+	const onion = "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion:8332"
+	sock, _ := fakeTorControl(t)
+	const q = "Use Tor's control socket? [y/N] "
+	tests := []struct {
+		name, url, ctl, answer string
+		root, denied           bool
+		want                   string // tor_control written
+		says                   string // in the transcript
+	}{
+		{"not onion", "http://127.0.0.1:8332", "unix:" + sock, "", false, false, "", ""},
+		{"no socket", onion, "unix:" + sock + ".gone", "", false, false, "", ""},
+		{"declined", onion, "unix:" + sock, "", false, false, "", "It needs the group "},
+		{"accepted", onion, "unix:" + sock, "y", false, false, "unix:" + sock, "Logging in to Tor: ok\n"},
+		{"no access", onion, "unix:" + sock, "y", false, true, "", "Logging in to Tor failed: dial unix " + sock + ": connect: permission denied\nJoin the group: sudo usermod -aG "},
+		{"root", onion, "unix:" + sock, "y", true, true, "unix:" + sock, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var script []turn
+			if tt.says != "" || tt.root {
+				script = append(script, turn{prompt: q, answer: tt.answer})
+			}
+			ft := newFakeTerm(t, script...)
+			h, _ := fakeSetup(t, newFakeTG(t), ft)
+			h.torControl = tt.ctl
+			if tt.denied {
+				os.Chmod(sock, 0)
+				defer os.Chmod(sock, 0o755)
+			}
+			w := &wizard{setupHost: *h, out: ft, root: tt.root, done: make(chan struct{})}
+			a := &answers{node: config.Endpoint{Kind: config.KindBitcoind, URL: tt.url}}
+			err := w.askTorControl(context.Background(), a)
+			close(w.done)
+			out := ft.transcript()
+			ft.done()
+			if err != nil || a.node.TorControl != tt.want {
+				t.Fatalf("err %v, tor_control %q, want %q\n%s", err, a.node.TorControl, tt.want, out)
+			}
+			if tt.says != "" && !strings.Contains(out, tt.says) || tt.says == "" && !tt.root && out != "" {
+				t.Errorf("transcript:\n%s", out)
+			}
+			if strings.Contains(out, "Logging in") && tt.root {
+				t.Errorf("root logged in itself:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestSetupNonInteractiveTorControl(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	w := newWorld(t)
+	w.node.Store(938266)
+	w.tip.Store(938266)
+	socks := newSOCKS5(t, w.srv.Listener.Addr().String())
+	sock, cmds := fakeTorControl(t)
+	src := t.TempDir()
+	pwSrc, tokSrc := filepath.Join(src, "pw"), filepath.Join(src, "tok")
+	os.WriteFile(pwSrc, []byte("s3cret\n"), 0o600)
+	os.WriteFile(tokSrc, []byte(tgToken+"\n"), 0o600)
+	fakeSetup(t, newFakeTG(t), nil)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	args := []string{"setup", "-non-interactive", "-config", path, "-node-url", "http://" + onion + ":8332", "-proxy", "socks5://" + socks.addr,
+		"-rpc-user", "tracker", "-rpc-password-file", pwSrc, "-token-file", tokSrc, "-chat-id", "42", "-references", "none"}
+
+	var out bytes.Buffer
+	if code, errs := runSetup(context.Background(), &out, append(args, "-tor-control", "unix:"+sock)...); code != exitOK || !strings.Contains(out.String(), "tor control: ok\n") {
+		t.Fatalf("code = %d\n%s\n%s", code, out.String(), errs)
+	}
+	cfg, _, err := config.LoadEnv(path, detectEnv)
+	if err != nil || cfg.Targets[0].Node.TorControl != "unix:"+sock {
+		t.Fatalf("config %+v, %v", cfg, err)
+	}
+	// setup logs in, and so does its check; neither sends a signal.
+	if got := cmds(); !strings.HasPrefix(got, "PROTOCOLINFO 1|AUTHENTICATE|QUIT") || strings.Contains(got, "SIGNAL") {
+		t.Errorf("control commands = %q", got)
+	}
+	for flag, want := range map[string]string{
+		"unix:" + sock + ".gone": "-tor-control unix:" + sock + ".gone: logging in to Tor failed: dial unix",
+		"10.0.0.1:9051":          `-tor-control "10.0.0.1:9051": host must be loopback`,
+	} {
+		if code, errs := runSetup(context.Background(), io.Discard, append(args, "-force", "-tor-control", flag)...); code != exitUsage || !strings.Contains(errs, want) {
+			t.Errorf("%s: code=%d\n%s", flag, code, errs)
+		}
+	}
+	local := append(slices.Clone(args), "-tor-control", "unix:"+sock)
+	local[slicesIndex(local, "-node-url")+1] = w.srv.URL + "/rpc"
+	if code, errs := runSetup(context.Background(), io.Discard, local...); code != exitUsage || !strings.Contains(errs, "-tor-control: only for a .onion node") {
+		t.Errorf("not onion: code=%d\n%s", code, errs)
+	}
+}
+
+// As root, the service's own access to tor_control is checked before
+// anything is written, as for the cookie.
+func TestSetupCheckServiceTor(t *testing.T) {
+	refused := service.UsageError{Err: errors.New("the service can't open Tor's control socket /run/tor/control; it runs as user node-tracker. To fix it:\n  1. sudo usermod -aG debian-tor node-tracker")}
+	ft := newFakeTerm(t, turn{prompt: "Write the config anyway, and install the service once that is fixed? [y/N] "})
+	h, _ := fakeSetup(t, newFakeTG(t), ft)
+	w := &wizard{setupHost: *h, out: ft, root: true, done: make(chan struct{})}
+	var checked *config.Config
+	w.torAccess = func(_ context.Context, c *config.Config) error { checked = c; return refused }
+	a := &answers{name: "orendil", node: config.Endpoint{Kind: config.KindBitcoind, URL: "http://x.onion:8332", TorControl: "unix:/run/tor/control"}}
+	err := w.checkService(context.Background(), a)
+	close(w.done)
+	out := ft.transcript()
+	ft.done()
+	if !errors.Is(err, errDeclined) || checked == nil || checked.Targets[0].Node.TorControl != "unix:/run/tor/control" {
+		t.Fatalf("err %v, checked %+v", err, checked)
+	}
+	if !strings.Contains(out, "Before anything is written: The service can't open Tor's control socket /run/tor/control;") {
+		t.Errorf("transcript:\n%s", out)
 	}
 }

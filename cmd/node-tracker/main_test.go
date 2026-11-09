@@ -685,21 +685,21 @@ notifiers:
 	}
 }
 
-// check logs in to the node's tor_control (NULL auth here) and sends no
-// signal; a control port that isn't there is reported.
-func TestCheckTorControl(t *testing.T) {
-	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+// fakeTorControl is Tor's control socket with NULL auth. It returns the
+// socket's path and the commands it got so far.
+func fakeTorControl(t *testing.T) (sock string, got func() string) {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "nt-tor") // short: sun_path is ~108 bytes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
-	sock := filepath.Join(dir, "control")
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock = filepath.Join(dir, "control")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	t.Cleanup(func() { ln.Close() })
 	var mu sync.Mutex
 	var cmds []string
 	go func() {
@@ -728,6 +728,18 @@ func TestCheckTorControl(t *testing.T) {
 			}()
 		}
 	}()
+	return sock, func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Join(cmds, "|")
+	}
+}
+
+// check logs in to the node's tor_control (NULL auth here) and sends no
+// signal; a control port that isn't there is reported.
+func TestCheckTorControl(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	sock, cmds := fakeTorControl(t)
 
 	w := newWorld(t)
 	w.node.Store(938266)
@@ -742,10 +754,7 @@ func TestCheckTorControl(t *testing.T) {
 	if code != exitOK || !strings.Contains(out, " · OK is the node's current state · tor control ok\n") {
 		t.Fatalf("check: code=%d out=%q\n%s", code, out, errs)
 	}
-	mu.Lock()
-	got := strings.Join(cmds, "|")
-	mu.Unlock()
-	if got != "PROTOCOLINFO 1|AUTHENTICATE|QUIT" {
+	if got := cmds(); got != "PROTOCOLINFO 1|AUTHENTICATE|QUIT" {
 		t.Fatalf("control commands = %q", got)
 	}
 
