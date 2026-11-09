@@ -388,8 +388,11 @@ are set are used as they are.
   owned by that process's user: any process can be named bitcoind. Every
   answer goes through the
   config validation, and the whole config through `config.Load` before it
-  is written. The chat id comes from a `/start` link with a random 16-byte
-  code, matched exactly, so stale updates and other users can't inject a
+  is written. For a `.onion` node behind Tor's default SOCKS port it
+  offers `tor_control` if Tor's control socket exists, default no; as a
+  user it writes it only after logging in to Tor works, as root only after
+  the service's access is checked. The chat id comes from a `/start` link
+  with a random 16-byte code, matched exactly, so stale updates and other users can't inject a
   chat. A typed channel or chat id goes through the same validation, and
   the bot's own `@name` is refused. A bot and chat kept from the existing
   config are loaded with it and tested before use. Text from the network

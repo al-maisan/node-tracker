@@ -35,6 +35,7 @@ const (
 
 	DefaultTelegramAPI = "https://api.telegram.org"
 	DefaultTorProxy    = "socks5://127.0.0.1:9050" // proxy of .onion endpoints without one
+	DefaultTorControl  = "unix:/run/tor/control"   // Tor's control socket on Debian/Ubuntu; setup offers it
 	DefaultTimeout     = 10 * time.Second          // per call, if the config sets no timeout
 	MaxFor             = 100                       // most ticks alert.for and alert.down_for may ask for
 )

@@ -529,6 +529,12 @@ func CheckCookies(h Host, cfg *config.Config) error {
 	return (&installer{h: h, o: Options{System: true}}).checkCookies(cfg)
 }
 
+// CheckTor is the check of install-service -system that the service can use
+// every tor_control of cfg, for setup to run before it writes.
+func CheckTor(ctx context.Context, h Host, cfg *config.Config) error {
+	return (&installer{h: h, o: Options{System: true}}).checkTor(ctx, cfg)
+}
+
 // dropInGroups are the SupplementaryGroups= of the *.conf drop-ins in dir.
 func dropInGroups(dir string) ([]string, error) {
 	confs, err := filepath.Glob(filepath.Join(dir, "*.conf"))

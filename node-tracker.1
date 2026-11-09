@@ -215,6 +215,17 @@ For a .onion node, a proxy from the environment other than that default
 is written to the configuration too, as the service may not have this
 shell's proxy variables.
 .TP
+.BI \-tor\-control " addr"
+For a .onion node: the control port of the local Tor, e.g.
+.BR unix:/run/tor/control ,
+written as
+.BR tor_control .
+While the node is down, node-tracker sends it SIGNAL NEWNYM, so Tor
+fetches the onion service's address data again. Run as a user, setup
+first logs in and stops if that fails; as root, it checks that the
+system service may open the socket and read the cookie. The socket's
+group (debian-tor) controls Tor fully. Default: none.
+.TP
 .B \-allow\-insecure
 Allow plain http to a node that is neither loopback nor .onion, e.g. on a
 trusted LAN.
