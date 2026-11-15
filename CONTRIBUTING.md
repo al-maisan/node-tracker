@@ -110,8 +110,9 @@ A new command or flag also goes into the man page, `node-tracker.1`;
 The package changelogs list the commits since the previous GitHub release,
 so run `make ppa` and `make copr` after `make release`.
 
-Release builds use the official Go toolchain pinned in
-`scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and
+Release builds use the official Go toolchain pinned in `.go-version`
+(bump it with Go patch releases; `RELEASE_GO=go1.x.y` overrides it), which
+CI uses too and checks daily with `govulncheck`, and
 the commit time as build time, so the archives are reproducible:
 `git checkout v1.2.3 && GOTOOLCHAIN=<Go version from node-tracker version> make dist VERSION=v1.2.3 BUILD_TIME=<build time from node-tracker version>`
 gives the same `SHA256SUMS` (for the `.deb` files, given the same

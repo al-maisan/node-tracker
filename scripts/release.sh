@@ -8,14 +8,17 @@ cd "$(dirname "$0")/.."
 source scripts/release-key.sh
 # shellcheck source=release-lib.sh
 source scripts/release-lib.sh
-# Official toolchain, so anyone can rebuild the same archives. Bump with new
-# Go patch releases.
-export GOTOOLCHAIN=${RELEASE_GO:-go1.26.11}
 
 die() {
 	echo "release: $*" >&2
 	exit 1
 }
+
+# Official toolchain from .go-version, which CI checks daily, so anyone can
+# rebuild the same archives. Bump it with new Go patch releases.
+go_version=$(<.go-version)
+[[ $go_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die ".go-version '$go_version' is not MAJOR.MINOR.PATCH"
+export GOTOOLCHAIN=${RELEASE_GO:-go$go_version}
 
 [[ -z $(git status --porcelain) ]] || die "working tree not clean"
 
