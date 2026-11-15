@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -395,6 +396,55 @@ func TestNewnymWhileNodeDown(t *testing.T) {
 	}
 	if !reflect.DeepEqual(once.at, want) {
 		t.Errorf("once NEWNYM at ticks %v, want %v", once.at, want)
+	}
+}
+
+// With down_for above 2, NEWNYM goes out after two failed ticks in a row,
+// before NODE_DOWN, so Tor can recover before the alert.
+func TestNewnymBeforeDownFor(t *testing.T) {
+	down := func(n int) []any { return slices.Repeat([]any{errDown}, n) }
+	for _, c := range []struct {
+		name   string
+		steps  []any
+		want   []int
+		alerts int
+	}{
+		{"one failure", slices.Concat([]any{100}, down(1), []any{100, 100}), nil, 0},
+		{"short outage", slices.Concat([]any{100}, down(3), []any{100, 100}), []int{2}, 0},
+		// Two failed ticks in a row, not two not-OK ones: the LAGGING tick in
+		// between counts toward for: 2, but not toward NEWNYM.
+		{"lagging in between", []any{100, errDown, 90, errDown, 100}, nil, 1},
+		// Going NODE_DOWN at tick 5 sends one again, then 30 minutes later.
+		{"long outage", slices.Concat([]any{100}, down(40), []any{100, 100}), []int{2, 5, 35}, 2},
+	} {
+		var tick int
+		tor := &fakeTor{t: &tick}
+		rec := &recorder{}
+		m := &Monitor{
+			Targets: []Target{{
+				Name: "btc", Node: &script{name: "node", steps: c.steps, tick: &tick}, Tor: tor,
+				Refs: []source.Source{&script{name: "ref", steps: []any{100}, tick: &tick}},
+				Rule: health.Rule{Threshold: 3, Recover: 1, For: 2, DownFor: 5}, Notify: []string{"rec"},
+			}},
+			Notifiers:   map[string]notify.Notifier{"rec": rec},
+			Timeout:     time.Second,
+			Retry:       notify.Retry{Attempts: 1},
+			OutboxLimit: 10,
+			Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Now: func() time.Time {
+				return time.Date(2026, 11, 15, 6, 0, 0, 0, time.UTC).Add(time.Duration(tick) * time.Minute)
+			},
+		}
+		d := &state.Data{Targets: map[string]health.Target{}}
+		for tick = range len(c.steps) {
+			if _, _, err := m.Tick(context.Background(), d, time.Second); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !reflect.DeepEqual(tor.at, c.want) || len(rec.got) != c.alerts || len(d.Newnym) != 0 {
+			t.Errorf("%s: NEWNYM at %v, want %v; alerts %q, want %d; newnym state %v",
+				c.name, tor.at, c.want, rec.got, c.alerts, d.Newnym)
+		}
 	}
 }
 

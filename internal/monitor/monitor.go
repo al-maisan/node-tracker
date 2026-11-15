@@ -17,8 +17,8 @@ import (
 	"github.com/al-maisan/node-tracker/internal/state"
 )
 
-// NewnymEvery is how often a NODE_DOWN target's Tor client is told again to
-// drop its cached onion service descriptors.
+// NewnymEvery is how often the Tor client of a target whose node stays
+// unreachable is told again to drop its cached onion service descriptors.
 const NewnymEvery = 30 * time.Minute
 
 // Target is one watched node.
@@ -142,7 +142,7 @@ func (m *Monitor) Tick(ctx context.Context, d *state.Data, deliverBy time.Durati
 		prev := d.Targets[t.Name]
 		next, alert := health.Step(prev, o.State, t.Rule, now)
 		d.Targets[t.Name] = next
-		m.newnym(ctx, d, t, prev.Current, next.Current, now)
+		m.newnym(ctx, d, t, prev, o.State, next.Current, now)
 		if next.Current == prev.Current {
 			continue
 		}
@@ -163,12 +163,17 @@ func (m *Monitor) Tick(ctx context.Context, d *state.Data, deliverBy time.Durati
 }
 
 // newnym tells t's Tor client to drop its cached onion service descriptors
-// when t goes NODE_DOWN, and again every NewnymEvery while it stays down.
-// After the node's Tor restarts, its onion service has new introduction
-// points, and a client with the old descriptor can fail for hours. A failed
-// attempt waits NewnymEvery too, so a broken control port logs rarely.
-func (m *Monitor) newnym(ctx context.Context, d *state.Data, t Target, prev, next health.State, now time.Time) {
-	if t.Tor == nil || next != health.NodeDown {
+// once t's node failed two ticks in a row or t goes NODE_DOWN, and again
+// every NewnymEvery while that lasts; going NODE_DOWN always sends one, in
+// case the early one came while the node's Tor was still restarting. After
+// the node's Tor restarts, its onion service has new introduction points,
+// and a client with the old descriptor can fail for hours. Sending it
+// before alert.down_for is reached lets Tor recover before the alert. A
+// failed attempt waits NewnymEvery too, so a broken control port logs
+// rarely.
+func (m *Monitor) newnym(ctx context.Context, d *state.Data, t Target, prev health.Target, observed, next health.State, now time.Time) {
+	down := next == health.NodeDown || observed == health.NodeDown && prev.Candidate == health.NodeDown
+	if t.Tor == nil || !down {
 		delete(d.Newnym, t.Name)
 		return
 	}
@@ -176,7 +181,7 @@ func (m *Monitor) newnym(ctx context.Context, d *state.Data, t Target, prev, nex
 	if ctx.Err() != nil { // shutting down: an attempt now would only delay the next one
 		return
 	}
-	if prev == health.NodeDown && ok && now.Sub(last) < NewnymEvery && !now.Before(last) {
+	if (prev.Current == health.NodeDown || next != health.NodeDown) && ok && now.Sub(last) < NewnymEvery && !now.Before(last) {
 		return
 	}
 	if d.Newnym == nil {
