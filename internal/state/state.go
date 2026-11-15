@@ -30,7 +30,8 @@ type Data struct {
 	Targets map[string]health.Target `json:"targets"`
 	Outbox  []Pending                `json:"outbox"`
 	// Newnym holds, per target, when its Tor client was last told to drop
-	// cached onion service descriptors (NEWNYM). Only while NODE_DOWN.
+	// cached onion service descriptors (NEWNYM). Only while the node is
+	// unreachable (two ticks in a row, or NODE_DOWN).
 	Newnym map[string]time.Time `json:"newnym,omitempty"`
 }
 
