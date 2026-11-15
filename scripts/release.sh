@@ -10,7 +10,7 @@ source scripts/release-key.sh
 source scripts/release-lib.sh
 # Official toolchain, so anyone can rebuild the same archives. Bump with new
 # Go patch releases.
-export GOTOOLCHAIN=${RELEASE_GO:-go1.26.10}
+export GOTOOLCHAIN=${RELEASE_GO:-go1.26.11}
 
 die() {
 	echo "release: $*" >&2
