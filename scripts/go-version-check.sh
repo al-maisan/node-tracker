@@ -18,6 +18,7 @@ if [[ -n ${GO_DL_JSON:-} ]]; then
 else
 	json=$(curl -fsSL --max-time 30 'https://go.dev/dl/?mode=json') || die "cannot read the Go release list"
 fi
+grep -qE '"version": *"go[0-9]' <<<"$json" || die "no Go versions in the release list (format changed?)"
 latest=$(grep -oE "\"version\": *\"go${minor//./\\.}\.[0-9]+\"" <<<"$json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1) || true
 [[ -n $latest ]] || die "go$minor is no longer supported: move .go-version to a supported Go"
 [[ $(printf '%s\n' "$have" "$latest" | sort -V | tail -1) == "$have" ]] || die "go$latest is out: bump .go-version (go$have)"

@@ -35,4 +35,8 @@ check "ahead of the list" "0 go-version-check: go1.26.12 is the latest go1.26" "
 check "unsupported minor" "1 go-version-check: go1.25 is no longer supported: move .go-version to a supported Go" "$(gvc 1.25.9)"
 check "no prefix match (1.2 vs 1.26)" "1 go-version-check: go1.2 is no longer supported: move .go-version to a supported Go" "$(gvc 1.2.3)"
 check "bad .go-version" "1 go-version-check: .go-version 'go1.26.11' is not MAJOR.MINOR.PATCH" "$(gvc go1.26.11)"
+printf '[]\n' >"$tmp/dl.json"
+check "empty list" "1 go-version-check: no Go versions in the release list (format changed?)" "$(gvc 1.26.11)"
+printf '<html>Go downloads</html>\n' >"$tmp/dl.json"
+check "HTML page" "1 go-version-check: no Go versions in the release list (format changed?)" "$(gvc 1.26.11)"
 exit $fail
