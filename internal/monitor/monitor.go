@@ -165,11 +165,12 @@ func (m *Monitor) Tick(ctx context.Context, d *state.Data, deliverBy time.Durati
 // newnym tells t's Tor client to drop its cached onion service descriptors
 // once t's node failed two ticks in a row or t goes NODE_DOWN, and again
 // every NewnymEvery while that lasts; going NODE_DOWN always sends one, in
-// case the early one came while the node's Tor was still restarting. After the node's Tor restarts, its
-// onion service has new introduction points, and a client with the old
-// descriptor can fail for hours. Sending it before alert.down_for is reached
-// lets Tor recover before the alert. A failed attempt waits NewnymEvery too,
-// so a broken control port logs rarely.
+// case the early one came while the node's Tor was still restarting. After
+// the node's Tor restarts, its onion service has new introduction points,
+// and a client with the old descriptor can fail for hours. Sending it
+// before alert.down_for is reached lets Tor recover before the alert. A
+// failed attempt waits NewnymEvery too, so a broken control port logs
+// rarely.
 func (m *Monitor) newnym(ctx context.Context, d *state.Data, t Target, prev health.Target, observed, next health.State, now time.Time) {
 	down := next == health.NodeDown || observed == health.NodeDown && prev.Candidate == health.NodeDown
 	if t.Tor == nil || !down {
