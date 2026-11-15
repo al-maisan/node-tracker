@@ -112,13 +112,14 @@ so run `make ppa` and `make copr` after `make release`.
 
 Release builds use the official Go toolchain pinned in `.go-version`.
 `make release` stops when a newer Go patch release is out;
-`RELEASE_GO=go1.x.y` overrides the toolchain and skips that check. CI
-uses the same toolchain. Its daily
-run on `main` fails when `govulncheck` finds an advisory or a newer Go
-patch release is out (`scripts/go-version-check.sh`): bump `.go-version`
-in a PR. GitHub mails the failure to whoever last changed the schedule,
-if Actions notifications are on, and turns the schedule off after 60
-days without repository activity; re-enable it under Actions.
+`RELEASE_GO=go1.x.y` overrides the toolchain and skips that check (if
+go.dev is down: `RELEASE_GO=go$(<.go-version) make release`). CI uses
+the same toolchain. Its daily run on `main` fails when `govulncheck`
+finds an advisory or a newer Go patch release is out
+(`scripts/go-version-check.sh`): bump `.go-version` in a PR. GitHub
+mails the failure to whoever last changed the schedule, if Actions
+notifications are on, and turns the schedule off after 60 days without
+repository activity; re-enable it under Actions.
 
 Release builds also use the commit time as build time, so the archives
 are reproducible:
