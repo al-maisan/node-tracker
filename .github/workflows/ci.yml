@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Daily, so a new advisory against the pinned toolchain fails CI before
-  # release day.
+  # Daily, so a new advisory against the pinned toolchain, or a newer Go
+  # patch release, fails CI before release day.
   schedule:
     - cron: "23 5 * * *"
 
@@ -31,3 +31,6 @@ jobs:
       - run: make dist VERSION=v0.0.0
       - run: cd dist && sha256sum -c SHA256SUMS && tar -xzf node-tracker_*_linux_amd64.tar.gz && ./node-tracker_*_linux_amd64/node-tracker version
       - run: scripts/brew-formula.sh v0.0.0 && ruby -c dist/node-tracker.rb
+      # Last, so the checks above still run: a newer Go patch release is out.
+      - if: github.event_name == 'schedule'
+        run: scripts/go-version-check.sh
