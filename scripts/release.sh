@@ -19,6 +19,9 @@ die() {
 go_version=$(<.go-version)
 [[ $go_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die ".go-version '$go_version' is not MAJOR.MINOR.PATCH"
 export GOTOOLCHAIN=${RELEASE_GO:-go$go_version}
+# Even if the daily CI run is off: no release on an outdated Go patch.
+# RELEASE_GO picks the toolchain on purpose, so it skips this.
+[[ -n ${RELEASE_GO:-} ]] || scripts/go-version-check.sh || exit 1
 
 [[ -z $(git status --porcelain) ]] || die "working tree not clean"
 

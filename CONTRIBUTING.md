@@ -110,8 +110,10 @@ A new command or flag also goes into the man page, `node-tracker.1`;
 The package changelogs list the commits since the previous GitHub release,
 so run `make ppa` and `make copr` after `make release`.
 
-Release builds use the official Go toolchain pinned in `.go-version`;
-`RELEASE_GO=go1.x.y` overrides it. CI uses the same toolchain. Its daily
+Release builds use the official Go toolchain pinned in `.go-version`.
+`make release` stops when a newer Go patch release is out;
+`RELEASE_GO=go1.x.y` overrides the toolchain and skips that check. CI
+uses the same toolchain. Its daily
 run on `main` fails when `govulncheck` finds an advisory or a newer Go
 patch release is out (`scripts/go-version-check.sh`): bump `.go-version`
 in a PR. GitHub mails the failure to whoever last changed the schedule,
