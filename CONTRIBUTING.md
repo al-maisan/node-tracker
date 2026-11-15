@@ -110,9 +110,19 @@ A new command or flag also goes into the man page, `node-tracker.1`;
 The package changelogs list the commits since the previous GitHub release,
 so run `make ppa` and `make copr` after `make release`.
 
-Release builds use the official Go toolchain pinned in
-`scripts/release.sh` (`RELEASE_GO`; bump it with Go patch releases) and
-the commit time as build time, so the archives are reproducible:
+Release builds use the official Go toolchain pinned in `.go-version`.
+`make release` stops when a newer Go patch release is out;
+`RELEASE_GO=go1.x.y` overrides the toolchain and skips that check (if
+go.dev is down: `RELEASE_GO=go$(<.go-version) make release`). CI uses
+the same toolchain. Its daily run on `main` fails when `govulncheck`
+finds an advisory or a newer Go patch release is out
+(`scripts/go-version-check.sh`): bump `.go-version` in a PR. GitHub
+mails the failure to whoever last changed the schedule, if Actions
+notifications are on, and turns the schedule off after 60 days without
+repository activity; re-enable it under Actions.
+
+Release builds also use the commit time as build time, so the archives
+are reproducible:
 `git checkout v1.2.3 && GOTOOLCHAIN=<Go version from node-tracker version> make dist VERSION=v1.2.3 BUILD_TIME=<build time from node-tracker version>`
 gives the same `SHA256SUMS` (for the `.deb` files, given the same
 `dpkg-deb` and xz versions). Then `make image VERSION=v1.2.3` gives the

@@ -77,6 +77,7 @@ test-ppa:
 	scripts/push-image_test.sh
 	scripts/push-brew_test.sh
 	scripts/doc-version_test.sh
+	scripts/go-version-check_test.sh
 
 test-copr:
 	scripts/copr-build_test.sh
