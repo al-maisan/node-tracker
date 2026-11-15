@@ -414,8 +414,8 @@ func TestNewnymBeforeDownFor(t *testing.T) {
 		// Two failed ticks in a row, not two not-OK ones: the LAGGING tick in
 		// between counts toward for: 2, but not toward NEWNYM.
 		{"lagging in between", []any{100, errDown, 90, errDown, 100}, nil, 1},
-		// NODE_DOWN at tick 5 sends none: the last one is under 30 minutes old.
-		{"long outage", slices.Concat([]any{100}, down(40), []any{100, 100}), []int{2, 32}, 2},
+		// Going NODE_DOWN at tick 5 sends one again, then 30 minutes later.
+		{"long outage", slices.Concat([]any{100}, down(40), []any{100, 100}), []int{2, 5, 35}, 2},
 	} {
 		var tick int
 		tor := &fakeTor{t: &tick}

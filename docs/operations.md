@@ -450,10 +450,11 @@ introduction points. Tor on the monitoring host may keep using the address
 data it fetched before and fail to reach the node for an hour or more,
 although the node is fine. With `tor_control`, node-tracker tells the local
 Tor to drop that data (`SIGNAL NEWNYM`) once the node failed two checks
-in a row, and again every 30 minutes while it stays unreachable. With
-`alert.down_for` above 2 this comes before the "node unreachable" alert,
-so Tor often recovers and no alert is sent. NEWNYM also gives new streams
-fresh circuits; it does not touch the node.
+in a row, again when it is `NODE_DOWN`, then every 30 minutes while it
+stays unreachable. With `alert.down_for` above 2 the first one comes
+before the "node unreachable" alert, so Tor often recovers and no alert
+is sent. NEWNYM also gives new streams fresh circuits; it does not touch
+the node.
 
 ```yaml
 node:

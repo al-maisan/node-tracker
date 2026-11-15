@@ -17,8 +17,8 @@ import (
 	"github.com/al-maisan/node-tracker/internal/state"
 )
 
-// NewnymEvery is how often a NODE_DOWN target's Tor client is told again to
-// drop its cached onion service descriptors.
+// NewnymEvery is how often the Tor client of a target whose node stays
+// unreachable is told again to drop its cached onion service descriptors.
 const NewnymEvery = 30 * time.Minute
 
 // Target is one watched node.
@@ -164,7 +164,8 @@ func (m *Monitor) Tick(ctx context.Context, d *state.Data, deliverBy time.Durati
 
 // newnym tells t's Tor client to drop its cached onion service descriptors
 // once t's node failed two ticks in a row or t goes NODE_DOWN, and again
-// every NewnymEvery while that lasts. After the node's Tor restarts, its
+// every NewnymEvery while that lasts; going NODE_DOWN always sends one, in
+// case the early one came while the node's Tor was still restarting. After the node's Tor restarts, its
 // onion service has new introduction points, and a client with the old
 // descriptor can fail for hours. Sending it before alert.down_for is reached
 // lets Tor recover before the alert. A failed attempt waits NewnymEvery too,
@@ -179,7 +180,7 @@ func (m *Monitor) newnym(ctx context.Context, d *state.Data, t Target, prev heal
 	if ctx.Err() != nil { // shutting down: an attempt now would only delay the next one
 		return
 	}
-	if ok && now.Sub(last) < NewnymEvery && !now.Before(last) {
+	if (prev.Current == health.NodeDown || next != health.NodeDown) && ok && now.Sub(last) < NewnymEvery && !now.Before(last) {
 		return
 	}
 	if d.Newnym == nil {

@@ -222,7 +222,7 @@ Bitcoin Core JSON-RPC. Only `getblockchaininfo` is called.
 | `username` + `password_file` / `password_env` | Use these instead of the cookie, with `rpcauth` credentials. |
 | `allow_insecure` | Allow plain `http://` to a non-loopback host (see below). |
 | `proxy` | Optional proxy for this endpoint only (see [Proxies and Tor](#proxies-and-tor)). |
-| `tor_control` | Node on a `.onion` URL only: the control port of the local Tor it is reached through, `unix:/run/tor/control` or a loopback `host:port`. Once the node failed two checks in a row (before `NODE_DOWN` if `alert.down_for` is higher), node-tracker sends it `SIGNAL NEWNYM`, then every 30 minutes while the node stays unreachable, so Tor fetches the onion service's address data again. See [Tor](operations.md#faster-recovery-after-the-nodes-tor-restarts). |
+| `tor_control` | Node on a `.onion` URL only: the control port of the local Tor it is reached through, `unix:/run/tor/control` or a loopback `host:port`. Once the node failed two checks in a row (before `NODE_DOWN` if `alert.down_for` is higher), node-tracker sends it `SIGNAL NEWNYM`, again when it goes `NODE_DOWN`, then every 30 minutes while the node stays unreachable, so Tor fetches the onion service's address data again. See [Tor](operations.md#faster-recovery-after-the-nodes-tor-restarts). |
 
 Set exactly one of `cookie_file` or `username`.
 
