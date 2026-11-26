@@ -97,3 +97,89 @@ func TestOpenRegular(t *testing.T) {
 		}
 	}
 }
+
+// anotherUsersFile is a readable regular file the test user doesn't own:
+// root's /etc/passwd, or as root a file of another user.
+func anotherUsersFile(t *testing.T) string {
+	if os.Geteuid() != 0 {
+		return "/etc/passwd"
+	}
+	p := filepath.Join(t.TempDir(), "not-the-test-users")
+	if err := os.WriteFile(p, []byte("other:user\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(p, 1, -1); err != nil {
+		t.Skipf("chown: %v", err)
+	}
+	return p
+}
+
+// ReadSmallOwner reads the file it opened only while it keeps the device
+// and owner it had when its path was listed: a cookie swapped for a
+// symlink to someone else's file is refused, a rewrite by the same owner
+// (bitcoind rotates its cookie atomically, under a new inode) is not.
+func TestReadSmallOwner(t *testing.T) {
+	dir := t.TempDir()
+	cookie := filepath.Join(dir, ".cookie")
+	if err := os.WriteFile(cookie, []byte("__cookie__:one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, ok := Owner(fi)
+	if !ok {
+		t.Fatal("no owner information")
+	}
+	// The listed file.
+	if b, err := ReadSmallOwner(cookie, 4<<10, &owner); err != nil || string(b) != "__cookie__:one" {
+		t.Errorf("the listed cookie: %q, %v", b, err)
+	}
+	// No owner expected: the check is off, as for the service's reads.
+	if b, err := ReadSmallOwner(cookie, 4<<10, nil); err != nil || string(b) != "__cookie__:one" {
+		t.Errorf("no owner expected: %q, %v", b, err)
+	}
+	// Rewritten under the same path: a new inode of the same owner, as
+	// bitcoind's rotation does.
+	os.Remove(cookie)
+	if err := os.WriteFile(cookie, []byte("__cookie__:two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := ReadSmallOwner(cookie, 4<<10, &owner); err != nil || string(b) != "__cookie__:two" {
+		t.Errorf("the rotated cookie: %q, %v", b, err)
+	}
+	// Swapped for a symlink to another user's file: refused, whatever
+	// it leads to is not read.
+	os.Remove(cookie)
+	if err := os.Symlink(anotherUsersFile(t), cookie); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := ReadSmallOwner(cookie, 4<<10, &owner); !errors.Is(err, ErrNotListed) || b != nil {
+		t.Errorf("the swapped cookie: %q, %v; want ErrNotListed", b, err)
+	}
+	// A symlink the listing already saw is fine: it leads to the same
+	// owner's file.
+	good := filepath.Join(dir, "good")
+	if err := os.WriteFile(good, []byte("__cookie__:x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(good, link); err != nil {
+		t.Fatal(err)
+	}
+	gfi, err := os.Stat(link) // follows the symlink, as the listing does
+	if err != nil {
+		t.Fatal(err)
+	}
+	gowner, _ := Owner(gfi)
+	if b, err := ReadSmallOwner(link, 4<<10, &gowner); err != nil || string(b) != "__cookie__:x" {
+		t.Errorf("a listed symlink: %q, %v", b, err)
+	}
+	// Another device is a refusal too, even with the owner unchanged.
+	dev := gowner
+	dev.Dev++
+	if _, err := ReadSmallOwner(good, 4<<10, &dev); !errors.Is(err, ErrNotListed) {
+		t.Errorf("another device: %v; want ErrNotListed", err)
+	}
+}
