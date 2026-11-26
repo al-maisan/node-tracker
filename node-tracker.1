@@ -214,6 +214,8 @@ Default: from the environment; for .onion,
 For a .onion node, a proxy from the environment other than that default
 is written to the configuration too, as the service may not have this
 shell's proxy variables.
+One with a user and password is refused instead: a proxy URL never holds
+a secret.
 .TP
 .BI \-tor\-control " addr"
 For a .onion node: the control port of the local Tor, e.g.

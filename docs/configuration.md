@@ -318,6 +318,12 @@ node:
   SOCKS port. Set `proxy:` to use another one, e.g. Tor Browser's
   `socks5://127.0.0.1:9150`. `check` shows which one is used: `(default)`,
   `(environment)`, or the `proxy:` value.
+- A proxy from the environment with a user and password never goes in the
+  config, and is never printed either (only its `scheme://host` shows).
+  Non-interactive setup refuses it; the interview asks for another one, with
+  Tor's SOCKS port as the default, which is then written into the config
+  explicitly. Give a proxy without credentials, or a local forwarder that
+  adds the login itself.
 - Plain `http://` is allowed without `allow_insecure` only if that proxy is
   on a loopback address (`127.0.0.0/8`, `::1`, `localhost`). From there on
   Tor encrypts, but the hop to a proxy elsewhere, e.g. Tor on another LAN
