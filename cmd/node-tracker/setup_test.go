@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	osexec "os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -21,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/al-maisan/node-tracker/internal/app"
 	"github.com/al-maisan/node-tracker/internal/config"
 	"github.com/al-maisan/node-tracker/internal/httpx"
 	"github.com/al-maisan/node-tracker/internal/service"
@@ -857,6 +860,229 @@ func TestSetupNonInteractiveProxy(t *testing.T) {
 	cfg, _, err := config.LoadEnv(path, detectEnv)
 	if err != nil || cfg.Targets[0].Node.Proxy != "socks5://"+socks.addr || cfg.Notifiers[0].Proxy != tgSOCKS {
 		t.Fatalf("config %+v, %v", cfg, err)
+	}
+}
+
+// net/http reads the proxy environment once per process, so the tests
+// around it run setup in a child process, which sets its own HTTP_PROXY
+// before setup first looks at it.
+const (
+	envProxyChild     = "NT_TEST_SETUP_ENV_PROXY"
+	envInterviewChild = "NT_TEST_SETUP_ENV_INTERVIEW"
+	envAcceptChild    = "NT_TEST_SETUP_ENV_ACCEPT"
+)
+
+// A .onion node picks up the proxy from the environment, which setup
+// writes into the config, as the service may lack this shell's variables.
+// One with credentials can't go in there — the config is printed below
+// and never holds a secret — so it is refused before anything is tested,
+// printed or written, showing only the proxy's origin.
+func TestSetupNonInteractiveEnvProxy(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	if mode := os.Getenv(envProxyChild); mode != "" { // the child: setup runs here
+		proxy, noProxy := "http://user:hunter2@127.0.0.1:1", ""
+		if mode == "plain" {
+			w := newWorld(t)
+			w.node.Store(938266)
+			proxy = "socks5://" + newSOCKS5(t, w.srv.Listener.Addr().String()).addr
+			noProxy = "127.0.0.1,localhost" // the fake Telegram is reached directly
+		}
+		for _, k := range []string{"REQUEST_METHOD", "NO_PROXY", "no_proxy"} {
+			os.Unsetenv(k)
+		}
+		os.Setenv("HTTP_PROXY", proxy)
+		os.Setenv("http_proxy", proxy)
+		if noProxy != "" {
+			os.Setenv("NO_PROXY", noProxy)
+		}
+		fakeSetup(t, newFakeTG(t), nil)
+		src := t.TempDir()
+		pw, tok := filepath.Join(src, "pw"), filepath.Join(src, "tok")
+		os.WriteFile(pw, []byte("s3cret\n"), 0o600)
+		os.WriteFile(tok, []byte(tgToken+"\n"), 0o600)
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		var out bytes.Buffer
+		code, errs := runSetup(context.Background(), &out, "setup", "-non-interactive", "-config", path,
+			"-node-url", "http://"+onion+":8332", "-rpc-user", "tracker", "-rpc-password-file", pw,
+			"-token-file", tok, "-chat-id", "42", "-references", "none")
+		written := "no"
+		if ents, err := os.ReadDir(filepath.Dir(path)); err == nil && len(ents) > 0 {
+			written = "yes"
+		}
+		cfg, _ := os.ReadFile(path)
+		fmt.Printf("CODE %d\nWRITTEN %s\nCONFIG\n%s\nOUTPUT\n%s%s", code, written, cfg, out.String(), errs)
+		os.Exit(0)
+	}
+	for _, tt := range []struct {
+		mode          string
+		want, notWant []string
+	}{
+		{"plain",
+			[]string{"CODE 0", "WRITTEN yes", "proxy: socks5://127.0.0.1:", "node http://" + onion + ":8332: chain main"},
+			[]string{"hunter2"}},
+		{"credentialed",
+			[]string{"CODE 2", "WRITTEN no", "CONFIG\n\n",
+				"node-tracker: setup: the proxy from the environment for the node, http://127.0.0.1:1, holds a user and password",
+				"Give -proxy a proxy without credentials, or run a local forwarder that adds the login itself"},
+			[]string{"hunter2", "user:", "5. The config", "test message sent", "node http://", "bot: @", "warning: the node did not answer"}},
+	} {
+		t.Run(tt.mode, func(t *testing.T) {
+			cmd := osexec.Command(os.Args[0], "-test.run=^TestSetupNonInteractiveEnvProxy$")
+			cmd.Env = append(os.Environ(), envProxyChild+"="+tt.mode)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("child: %v\n%s", err, out)
+			}
+			for _, s := range tt.want {
+				if !strings.Contains(string(out), s) {
+					t.Errorf("no %q in the child's output:\n%s", s, out)
+				}
+			}
+			for _, s := range tt.notWant {
+				if strings.Contains(string(out), s) {
+					t.Errorf("%q shows in the child's output:\n%s", s, out)
+				}
+			}
+		})
+	}
+}
+
+// In the interview, the proxy from the environment is the default answer
+// for a .onion node's Tor SOCKS proxy, and ask prints defaults verbatim:
+// one with credentials is never offered or printed — only its origin is —
+// and another proxy is asked for.
+func TestSetupInterviewCredentialedEnvProxy(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	if os.Getenv(envInterviewChild) != "" { // the child: the interview runs here
+		for _, k := range []string{"REQUEST_METHOD", "NO_PROXY", "no_proxy"} {
+			os.Unsetenv(k)
+		}
+		os.Setenv("HTTP_PROXY", "http://user:hunter2@127.0.0.1:1")
+		os.Setenv("http_proxy", "http://user:hunter2@127.0.0.1:1")
+		ctx, cancel := context.WithCancel(context.Background())
+		tg := newFakeTG(t)
+		ft := newFakeTerm(t,
+			turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", answer: "http://" + onion + ":8332"},
+			turn{prompt: "Tor SOCKS proxy [socks5://127.0.0.1:9050]: ", answer: "socks5://" + tg.srv.Listener.Addr().String()},
+			turn{prompt: "Do you already have the node's RPC user and password?", do: cancel},
+		)
+		fakeSetup(t, tg, ft)
+		code, errs := runSetup(ctx, ft, "setup", "-config", filepath.Join(t.TempDir(), "config.yaml"))
+		fmt.Printf("CODE %d\nTRANSCRIPT\n%s\nSTDERR\n%s", code, ft.transcript(), errs)
+		os.Exit(0)
+	}
+	cmd := osexec.Command(os.Args[0], "-test.run=^TestSetupInterviewCredentialedEnvProxy$")
+	cmd.Env = append(os.Environ(), envInterviewChild+"=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"CODE 1",
+		"The proxy from the environment, http://127.0.0.1:1, holds a user and password",
+		"Tor SOCKS proxy [socks5://127.0.0.1:9050]: ",
+		"setup aborted (context canceled); nothing written",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("no %q in the child's output:\n%s", want, out)
+		}
+	}
+	for _, leak := range []string{"hunter2", "user:"} {
+		if strings.Contains(string(out), leak) {
+			t.Errorf("%q shows in the child's output:\n%s", leak, out)
+		}
+	}
+}
+
+// Accepting the Tor default after the environment's proxy was refused must
+// select it explicitly: an empty proxy would fall back to that same
+// environment's one when the node is validated and tested (Endpoint.validate
+// consults the environment for an empty proxy). The script presses Enter at
+// the Tor prompt, then the validated endpoint's effective proxy is checked.
+func TestAskEndpointTorDefaultAfterRefusal(t *testing.T) {
+	const onion = "2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"
+	if os.Getenv(envAcceptChild) != "" { // the child: askEndpoint runs here
+		for _, k := range []string{"REQUEST_METHOD", "NO_PROXY", "no_proxy"} {
+			os.Unsetenv(k)
+		}
+		os.Setenv("HTTP_PROXY", "http://user:hunter2@127.0.0.1:1")
+		os.Setenv("http_proxy", "http://user:hunter2@127.0.0.1:1")
+		// dialProxy must find Tor's default port listening; a real Tor
+		// answers it just as well, so a busy port is not an error.
+		if ln, err := net.Listen("tcp", "127.0.0.1:9050"); err == nil {
+			defer ln.Close()
+			go func() {
+				for {
+					c, err := ln.Accept()
+					if err != nil {
+						return
+					}
+					c.Close()
+				}
+			}()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		ft := newFakeTerm(t,
+			turn{prompt: "Node RPC URL [http://127.0.0.1:8332]: ", answer: "http://" + onion + ":8332"},
+			turn{prompt: "Tor SOCKS proxy [socks5://127.0.0.1:9050]: "}, // Enter accepts the default
+			turn{prompt: "Do you already have the node's RPC user and password?", do: cancel},
+		)
+		h, _ := fakeSetup(t, newFakeTG(t), ft)
+		w := &wizard{setupHost: *h, out: ft, hc: httpx.NewClient(), done: make(chan struct{})}
+		e, _, err := w.askEndpoint(ctx, config.Endpoint{Kind: config.KindBitcoind, URL: "http://127.0.0.1:8332"}, "")
+		close(w.done)
+		e.Username, e.Password = "u", "x"
+		ce, _, verr := config.CheckEndpoint(e, "node", config.NodeKinds)
+		fmt.Printf("WRITTEN PROXY %q\nEFFECTIVE PROXY %q\nASK %v, VALIDATE %v\nTRANSCRIPT\n%s", e.Proxy, app.Proxy(ce), err, verr, ft.transcript())
+		os.Exit(0)
+	}
+	cmd := osexec.Command(os.Args[0], "-test.run=^TestAskEndpointTorDefaultAfterRefusal$")
+	cmd.Env = append(os.Environ(), envAcceptChild+"=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		`WRITTEN PROXY "socks5://127.0.0.1:9050"`,
+		`EFFECTIVE PROXY "socks5://127.0.0.1:9050"`,
+		"ASK context canceled, VALIDATE <nil>",
+		"The proxy from the environment, http://127.0.0.1:1, holds a user and password",
+		"Tor SOCKS proxy [socks5://127.0.0.1:9050]: \n", // the answer is Enter
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("no %q in the child's output:\n%s", want, out)
+		}
+	}
+	for _, leak := range []string{"hunter2", "user:", "(environment)"} {
+		if strings.Contains(string(out), leak) {
+			t.Errorf("%q shows in the child's output:\n%s", leak, out)
+		}
+	}
+}
+
+// finish validates the config it is about to print: one that does not
+// load — here a node proxy with credentials, which checkProxy rejects —
+// is never printed, and nothing is written either.
+func TestFinishValidatesBeforePrinting(t *testing.T) {
+	ft := newFakeTerm(t)
+	h, _ := fakeSetup(t, newFakeTG(t), ft)
+	w := &wizard{setupHost: *h, o: setupOptions{nonInteractive: true}, out: ft, hc: httpx.NewClient(), done: make(chan struct{})}
+	defer close(w.done)
+	dir := t.TempDir()
+	a := &answers{name: "btc", preset: defaultPreset, token: tgToken, chatID: "42",
+		node: config.Endpoint{Kind: config.KindBitcoind, URL: "http://127.0.0.1:8332", Proxy: "http://user:hunter2@127.0.0.1:1"}}
+	code, err := w.finish(context.Background(), a, filepath.Join(dir, "config.yaml"), false)
+	out := ft.transcript()
+	if code != exitFailure || err == nil || !strings.Contains(err.Error(), "must not contain credentials") {
+		t.Fatalf("code=%d, err=%v\n%s", code, err, out)
+	}
+	for _, s := range []string{"5. The config", "hunter2", "user:"} {
+		if strings.Contains(out, s) || strings.Contains(err.Error(), s) {
+			t.Errorf("%q shows:\n%s\n%v", s, out, err)
+		}
+	}
+	if ents, e := os.ReadDir(dir); e != nil || len(ents) != 0 {
+		t.Errorf("files left in %s: %v (%v)", dir, ents, e)
 	}
 }
 

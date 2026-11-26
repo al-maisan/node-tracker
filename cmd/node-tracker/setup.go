@@ -528,14 +528,26 @@ func (w *wizard) askEndpoint(ctx context.Context, prev config.Endpoint, cookie s
 
 	if explain.IsOnion(e.URL) {
 		def := effectiveProxy(ce)
+		refused := proxyCredentials(def)
+		if refused {
+			// ask prints the default verbatim, so a proxy with credentials
+			// must not be one; only its origin is safe to show. Tor's SOCKS
+			// port is the default instead.
+			fmt.Fprintf(w.out, "The proxy from the environment, %s, holds a user and password; a proxy URL never holds a secret, so it is not offered. Give a proxy without credentials, or the address of a local forwarder that adds the login itself.\n", httpx.Origin(def))
+			def = config.DefaultTorProxy
+		}
 		for {
 			p, err := w.ask(ctx, "Tor SOCKS proxy", def)
 			if err != nil {
 				return e, "", err
 			}
-			// The service may lack this shell's proxy variables.
+			// The service may lack this shell's proxy variables, so a proxy
+			// other than Tor's default is written out. After a refusal above
+			// the default is written too: an empty proxy would make
+			// validation and the node test use the refused environment's one
+			// again (Endpoint.validate looks there for an empty proxy).
 			e.Proxy = ""
-			if p != config.DefaultTorProxy {
+			if p != config.DefaultTorProxy || refused {
 				e.Proxy = p
 			}
 			probe := e
@@ -1211,8 +1223,16 @@ func (w *wizard) fromFlags(ctx context.Context) (*answers, error) {
 		return nil, err
 	}
 	// As interviewed: the service may lack this shell's proxy variables.
-	if p := effectiveProxy(ce); explain.IsOnion(ce.URL) && a.node.Proxy == "" && p != config.DefaultTorProxy {
-		a.node.Proxy = p
+	// One with credentials can't go in the config, which is printed below
+	// and never holds a secret: refuse it here, before anything is tested
+	// or printed, and without its password.
+	if explain.IsOnion(ce.URL) && a.node.Proxy == "" {
+		if p := effectiveProxy(ce); p != config.DefaultTorProxy {
+			if proxyCredentials(p) {
+				return nil, fmt.Errorf("the proxy from the environment for the node, %s, holds a user and password; a proxy URL never holds a secret, so it can't go in the config. Give -proxy a proxy without credentials, or run a local forwarder that adds the login itself", httpx.Origin(p))
+			}
+			a.node.Proxy = p
+		}
 	}
 	if o.torControl != "" {
 		ctl, err := torctl.New(o.torControl)
@@ -1356,27 +1376,6 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 			exist = append(exist, f.path)
 		}
 	}
-	fmt.Fprintf(w.out, "\n5. The config\n%s:\n\n%s\n", path, indent(cfgData))
-	for _, f := range files[:len(files)-1] {
-		fmt.Fprintf(w.out, "%s goes to %s (mode %04o).\n", upper(f.what), f.path, mode)
-	}
-	if err := w.checkService(ctx, a); err != nil {
-		if errors.Is(err, errDeclined) {
-			return exitFailure, err
-		}
-		return exitUsage, err
-	}
-	if len(exist) > 0 {
-		q := fmt.Sprintf("These files exist and differ: %s. Replace them (the old config is kept as .bak, old secrets are not)?", strings.Join(exist, ", "))
-		if w.o.nonInteractive {
-			if !w.o.force {
-				return exitUsage, fmt.Errorf("%s exist and differ; rerun with -force to replace them (keeps the old config as .bak)", strings.Join(exist, ", "))
-			}
-		} else if ok, err := w.yes(ctx, q, false); err != nil || !ok {
-			return exitFailure, cmp.Or(err, errDeclined)
-		}
-	}
-
 	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
 		if err := os.MkdirAll(dir, map[bool]fs.FileMode{true: 0o750, false: 0o700}[root]); err != nil {
 			return exitFailure, err
@@ -1388,7 +1387,10 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 		}
 	}
 	// Validate the config as the commands will load it, with the secrets in
-	// temporary files, before any file is replaced.
+	// temporary files, before any file is replaced — and before it is
+	// printed below: an invalid one is not printed, as it may hold a secret
+	// (a proxy's login, say). The temporary files go in the directory
+	// above, so it is created first.
 	var tmps []string
 	defer func() {
 		for _, t := range tmps {
@@ -1419,6 +1421,27 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 	for _, wn := range warns {
 		fmt.Fprintf(w.out, "config warning: %s\n", wn)
 	}
+	fmt.Fprintf(w.out, "\n5. The config\n%s:\n\n%s\n", path, indent(cfgData))
+	for _, f := range files[:len(files)-1] {
+		fmt.Fprintf(w.out, "%s goes to %s (mode %04o).\n", upper(f.what), f.path, mode)
+	}
+	if err := w.checkService(ctx, a); err != nil {
+		if errors.Is(err, errDeclined) {
+			return exitFailure, err
+		}
+		return exitUsage, err
+	}
+	if len(exist) > 0 {
+		q := fmt.Sprintf("These files exist and differ: %s. Replace them (the old config is kept as .bak, old secrets are not)?", strings.Join(exist, ", "))
+		if w.o.nonInteractive {
+			if !w.o.force {
+				return exitUsage, fmt.Errorf("%s exist and differ; rerun with -force to replace them (keeps the old config as .bak)", strings.Join(exist, ", "))
+			}
+		} else if ok, err := w.yes(ctx, q, false); err != nil || !ok {
+			return exitFailure, cmp.Or(err, errDeclined)
+		}
+	}
+
 	for _, f := range files {
 		if err := w.write(f, mode, gid); err != nil {
 			return exitFailure, err
@@ -1759,6 +1782,15 @@ func effectiveProxy(e config.Endpoint) string {
 		return p.String()
 	}
 	return config.DefaultTorProxy
+}
+
+// proxyCredentials says whether raw, a proxy URL, holds a user or a
+// password, as checkProxy rejects for the config: a proxy URL never holds
+// a secret. One from the environment is refused rather than written or
+// printed — never stripped of them either, which would break its login.
+func proxyCredentials(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.User != nil
 }
 
 // torDown says that Tor does not answer at proxy, and how to fix it.
