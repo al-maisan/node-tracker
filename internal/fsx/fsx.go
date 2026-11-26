@@ -67,7 +67,31 @@ var (
 	ErrNotRegular = errors.New("not a regular file")
 	// ErrTooLarge: ReadSmall's file is larger than its limit.
 	ErrTooLarge = errors.New("file too large")
+	// ErrNotListed: the opened file's device or owner is not the one
+	// recorded when its path was listed (see FileOwner): the path leads
+	// to another file now, a symlink to someone else's say.
+	ErrNotListed = errors.New("not the file that was listed")
 )
+
+// FileOwner is the identity of a file at the moment its path was listed:
+// its device and its owner. Root setup, which reads cookies in
+// directories other users control, accepts the file only while it keeps
+// this identity. The inode is not part of it: bitcoind rewrites its
+// cookie atomically, as a new file, so the same cookie gets a new inode.
+type FileOwner struct {
+	Dev uint64
+	UID uint32
+}
+
+// Owner is fi's device and owner, or ok false where a file carries no
+// such information (not Unix).
+func Owner(fi fs.FileInfo) (FileOwner, bool) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return FileOwner{}, false
+	}
+	return FileOwner{Dev: uint64(st.Dev), UID: uint32(st.Uid)}, true
+}
 
 // OpenRegular opens path for reading, which must be (or link to) a regular
 // file; it is for files in directories another user controls, such as a
@@ -77,6 +101,20 @@ var (
 // open. ErrNotRegular doesn't name the path: the caller decides whether it
 // may be shown.
 func OpenRegular(path string) (*os.File, error) {
+	return openRegular(path, nil)
+}
+
+// OpenRegularOwner opens path like OpenRegular, and the opened file must
+// have owner, the identity recorded when the path was listed (Owner): the
+// path is in its owner's directory, and can be swapped for a symlink to
+// someone else's file between the listing and this open. The check is
+// against the opened file, where the read happens, not the path: another
+// stat of the path would only move the race.
+func OpenRegularOwner(path string, owner *FileOwner) (*os.File, error) {
+	return openRegular(path, owner)
+}
+
+func openRegular(path string, owner *FileOwner) (*os.File, error) {
 	if fi, err := os.Stat(path); err != nil {
 		return nil, err
 	} else if !fi.Mode().IsRegular() {
@@ -86,19 +124,38 @@ func OpenRegular(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
 		f.Close()
 		return nil, cmp.Or(err, ErrNotRegular)
+	}
+	if owner != nil {
+		if o, ok := Owner(fi); !ok || o != *owner {
+			f.Close()
+			return nil, ErrNotListed
+		}
 	}
 	return f, nil
 }
 
 // ReadSmall reads path, which must be (or link to) a regular file of at
-// most max bytes; it is for secrets and cookies. It opens with OpenRegular
-// and reads at most max+1 bytes, so /dev/zero or a huge file can't exhaust
-// memory. ErrNotRegular and ErrTooLarge don't name the path.
+// most max bytes; it is for secrets and cookies. It opens with the checks
+// of OpenRegular and reads at most max+1 bytes, so /dev/zero or a huge
+// file can't exhaust memory. ErrNotRegular and ErrTooLarge don't name
+// the path.
 func ReadSmall(path string, max int64) ([]byte, error) {
-	f, err := OpenRegular(path)
+	return readSmall(path, max, nil)
+}
+
+// ReadSmallOwner reads path like ReadSmall, and the opened file must have
+// owner, the identity recorded when the path was listed (FileOwner): root
+// setup reads another user's cookie only while it stays that user's file.
+func ReadSmallOwner(path string, max int64, owner *FileOwner) ([]byte, error) {
+	return readSmall(path, max, owner)
+}
+
+func readSmall(path string, max int64, owner *FileOwner) ([]byte, error) {
+	f, err := openRegular(path, owner)
 	if err != nil {
 		return nil, err
 	}

@@ -114,12 +114,13 @@ type Endpoint struct {
 	Proxy         string `yaml:"proxy,omitempty"`       // empty: from the environment; for .onion, DefaultTorProxy if the environment has none
 	TorControl    string `yaml:"tor_control,omitempty"` // nodes on .onion: control port of the local Tor, sent NEWNYM while the node is down
 
-	Name         string        `yaml:"-"` // derived: kind:host
-	Password     Secret        `yaml:"-"` // resolved from PasswordFile / PasswordEnv
-	Timeout      time.Duration `yaml:"-"` // derived: per-call timeout of .onion hosts; 0 means Config.Timeout
-	DefaultProxy bool          `yaml:"-"` // derived: Proxy was set to DefaultTorProxy
-	NodeHost     bool          `yaml:"-"` // derived, references: an Esplora server on the node's host, likely fed by the node
-	HideCookie   bool          `yaml:"-"` // derived: CookieFile may be a pasted secret, so keep it out of messages (see shownPath)
+	Name         string         `yaml:"-"` // derived: kind:host
+	Password     Secret         `yaml:"-"` // resolved from PasswordFile / PasswordEnv
+	Timeout      time.Duration  `yaml:"-"` // derived: per-call timeout of .onion hosts; 0 means Config.Timeout
+	DefaultProxy bool           `yaml:"-"` // derived: Proxy was set to DefaultTorProxy
+	NodeHost     bool           `yaml:"-"` // derived, references: an Esplora server on the node's host, likely fed by the node
+	HideCookie   bool           `yaml:"-"` // derived: CookieFile may be a pasted secret, so keep it out of messages (see shownPath)
+	CookieOwner  *fsx.FileOwner `yaml:"-"` // setup as root: the identity of another user's cookie at listing time; setup reads the cookie only while it keeps it
 }
 
 // Alert holds the thresholds. Pointers tell "unset" from 0.

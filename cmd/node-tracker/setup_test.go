@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/al-maisan/node-tracker/internal/config"
+	"github.com/al-maisan/node-tracker/internal/fsx"
 	"github.com/al-maisan/node-tracker/internal/httpx"
 	"github.com/al-maisan/node-tracker/internal/service"
 	"github.com/al-maisan/node-tracker/internal/source/bitcoind"
@@ -910,8 +911,8 @@ func TestSetupUserNodeHint(t *testing.T) {
 		"Best fit: a user service. Run 'node-tracker setup' as that user, without sudo.\n"
 	const notes = "The system service can't read /home/alice/.bitcoin/.cookie: it is in the home of \"alice\".\n" +
 		"For the system service, give the cookie /mnt/ssd/bitcoin/.cookie; the node-tracker user must be able to read it.\n"
-	nodes := []userNode{{"alice", "http://127.0.0.1:8332", "/home/alice/.bitcoin/.cookie", true}, {"bob", "http://127.0.0.1:38332", "/mnt/ssd/bitcoin/.cookie", false},
-		{"carol", "http://127.0.0.1:8332", "/nonexistent-node-tracker-test/var/lib/bitcoind/.cookie", false}} // the one tried
+	nodes := []userNode{{"alice", "http://127.0.0.1:8332", "/home/alice/.bitcoin/.cookie", true, fsx.FileOwner{}}, {"bob", "http://127.0.0.1:38332", "/mnt/ssd/bitcoin/.cookie", false, fsx.FileOwner{}},
+		{"carol", "http://127.0.0.1:8332", "/nonexistent-node-tracker-test/var/lib/bitcoind/.cookie", false, fsx.FileOwner{}}} // the one tried
 	for _, tt := range []struct {
 		name  string
 		euid  int
@@ -955,6 +956,148 @@ func TestSetupUserNodeHint(t *testing.T) {
 	}
 }
 
+// anotherUsersFile is a readable regular file the test user doesn't own:
+// root's /etc/passwd, or as root a file of another user.
+func anotherUsersFile(t *testing.T) string {
+	if os.Geteuid() != 0 {
+		return "/etc/passwd"
+	}
+	p := filepath.Join(t.TempDir(), "not-the-test-users")
+	if err := os.WriteFile(p, []byte("other:user\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(p, 1, -1); err != nil {
+		t.Skipf("chown: %v", err)
+	}
+	return p
+}
+
+// As root, the cookie advertised for another user's bitcoind is read only
+// while it is the file that was listed: swapped for a symlink to another
+// user's file after the listing, the node test is refused and the file's
+// content goes nowhere.
+func TestSetupUserNodeCookieSwapped(t *testing.T) {
+	w := newWorld(t)
+	w.node.Store(938266)
+	cookie := filepath.Join(t.TempDir(), ".cookie")
+	if err := os.WriteFile(cookie, []byte("__cookie__:x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, _ := fsx.Owner(fi) // what the listing saw
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ft := newFakeTerm(t,
+		turn{prompt: "Stop here? [Y/n] ", answer: "n"},
+		turn{prompt: "Node RPC URL [" + w.srv.URL + "]: "},
+		turn{prompt: "Use bitcoind's cookie file for auth? [Y/n] "},
+		turn{prompt: "Cookie file [" + cookie + "]: "},
+		turn{prompt: "[r]etry, [c]hange the settings, or [k]eep them untested? [r]: ", answer: "k"},
+		turn{prompt: "Name of this node in alerts [orendil]: ", do: cancel},
+	)
+	h, _ := fakeSetup(t, newFakeTG(t), ft)
+	h.euid = 0
+	h.userNodes = func() []userNode {
+		// The attacker's move, right after the listing: the cookie
+		// becomes a symlink to a file of another user.
+		os.Remove(cookie)
+		if err := os.Symlink(anotherUsersFile(t), cookie); err != nil {
+			t.Fatal(err)
+		}
+		return []userNode{{"bob", w.srv.URL, cookie, false, own}}
+	}
+	code, _ := runSetup(ctx, ft, "setup")
+	ft.done()
+	out := ft.transcript()
+	if code == exitOK {
+		t.Error("the canceled setup wrote a config")
+	}
+	if !strings.Contains(out, "Testing the node … failed: read cookie file "+cookie+": not the file that was listed\n") {
+		t.Errorf("the swapped cookie was not refused:\n%s", out)
+	}
+	if strings.Contains(out, "ok: chain main") {
+		t.Error("the swapped cookie was read")
+	}
+}
+
+// The final check of finish polls the node as root too: a cookie
+// advertised for another user's bitcoind, swapped only after the node
+// test passed, is refused there just the same.
+func TestSetupUserNodeCookieStep6(t *testing.T) {
+	w := newWorld(t)
+	w.node.Store(938266)
+	cookie := filepath.Join(t.TempDir(), ".cookie")
+	if err := os.WriteFile(cookie, []byte("__cookie__:x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, _ := fsx.Owner(fi)
+	tg := newFakeTG(t)
+	ft := newFakeTerm(t,
+		turn{prompt: "Stop here? [Y/n] ", answer: "n"},
+		turn{prompt: "Node RPC URL [" + w.srv.URL + "]: "},
+		turn{prompt: "Use bitcoind's cookie file for auth? [Y/n] "},
+		turn{prompt: "Cookie file [" + cookie + "]: "},
+		turn{prompt: "Name of this node in alerts [orendil]: "},
+		turn{prompt: "References: Esplora API URLs separated by spaces, or none [https://mempool.space/api https://blockstream.info/api]: ", answer: "none"},
+		turn{prompt: "Preset [2]: "},
+		turn{prompt: "Name of this tracker in front of every alert, to tell several trackers apart (none for no name) [orendil]: "},
+		turn{prompt: "Do you already have a Telegram bot for the alerts? [y/N] "},
+		turn{prompt: "Bot token (input hidden): ", answer: tgToken, secret: true},
+		turn{prompt: "Choice [1]: "},
+		turn{prompt: "Install and start the systemd service now", answer: "n"},
+	)
+	tg.updates = func(_ context.Context, offset int64) (int, string) {
+		m := nonceRE.FindStringSubmatch(ft.transcript())
+		if m == nil {
+			t.Error("getUpdates before the link was shown")
+			return 500, ""
+		}
+		if offset == 0 { // left over from before
+			return 200, `{"ok":true,"result":[{"update_id":5,"message":{"text":"/start","chat":{"id":7,"type":"private"}}}]}`
+		}
+		return 200, `{"ok":true,"result":[{"update_id":8,"message":{"text":"/start ` + m[1] + `","chat":{"id":42,"type":"private","username":"me"}}}]}`
+	}
+	h, _ := fakeSetup(t, tg, ft)
+	h.euid = 0
+	h.userNodes = func() []userNode { return []userNode{{"bob", w.srv.URL, cookie, false, own}} }
+	h.cookies = func(*config.Config) error {
+		// The attacker's move, in the window between the node test and
+		// the final check.
+		os.Remove(cookie)
+		if err := os.Symlink(anotherUsersFile(t), cookie); err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	}
+	code, errs := runSetup(context.Background(), ft, "setup")
+	out := ft.transcript()
+	ft.done()
+	t.Logf("transcript:\n%s", out)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s\n%s", code, out, errs)
+	}
+	if !strings.Contains(out, "Testing the node … ok: chain main, height 938,266\n") {
+		t.Error("the listed cookie was refused in the node test")
+	}
+	if n := strings.Count(out, "not the file that was listed"); n != 1 || !strings.Contains(out, "read cookie file "+cookie+": not the file that was listed") {
+		t.Errorf("the swapped cookie was refused %d times, want 1, in the final check\n%s", n, out)
+	}
+	if strings.Index(out, "\n6. Check\n") > strings.Index(out, "not the file that was listed") {
+		t.Error("the refusal came before the final check")
+	}
+	path := filepath.Join(h.etcDir, "config.yaml")
+	if !strings.Contains(read(t, path), cookie) {
+		t.Error("no cookie_file in the written config")
+	}
+}
+
 func TestUserNodes(t *testing.T) {
 	proc, homes, data := t.TempDir(), t.TempDir(), t.TempDir()
 	os.MkdirAll(filepath.Join(homes, "bob"), 0o755)
@@ -994,13 +1137,21 @@ func TestUserNodes(t *testing.T) {
 		}
 		return &u, nil
 	}
-	want := []userNode{{"alice", "http://127.0.0.1:8332", alice, true}, {"alice", "http://127.0.0.1:38332", signet, false}}
+	owner := func(p string) fsx.FileOwner { // the cookie's, as userNodes records it
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o, _ := fsx.Owner(fi)
+		return o
+	}
+	want := []userNode{{"alice", "http://127.0.0.1:8332", alice, true, owner(alice)}, {"alice", "http://127.0.0.1:38332", signet, false, owner(signet)}}
 	if got := userNodes(proc, lookup); !slices.Equal(got, want) {
 		t.Errorf("userNodes = %v, want %v", got, want)
 	}
 	// A service account with the home "/": only its arguments count.
 	users[me] = user.User{Username: "svc", HomeDir: "/"}
-	if got, want := userNodes(proc, lookup), []userNode{{"svc", "http://127.0.0.1:38332", signet, false}}; !slices.Equal(got, want) {
+	if got, want := userNodes(proc, lookup), []userNode{{"svc", "http://127.0.0.1:38332", signet, false, owner(signet)}}; !slices.Equal(got, want) {
 		t.Errorf("home /: userNodes = %v, want %v", got, want)
 	}
 	if got := userNodes(filepath.Join(proc, "missing"), lookup); got != nil {

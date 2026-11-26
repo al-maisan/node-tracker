@@ -430,6 +430,10 @@ func (w *wizard) interview(ctx context.Context, path string) (*answers, error) {
 func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local bool, err error) {
 	d := w.detect()
 	e := config.Endpoint{Kind: config.KindBitcoind, URL: d.URL, CookieFile: d.CookieFile}
+	// The cookies advertised for other users' bitcoinds, with the device
+	// and owner each had when listed: whichever is taken, it is read as
+	// root only while it keeps that identity (fsx.FileOwner).
+	var listed map[string]fsx.FileOwner
 	h, ce, err := w.testNode(ctx, e, "")
 	if err == nil {
 		fmt.Fprintf(w.out, "Found bitcoind at %s: %s, cookie %s\n", d.URL, heightInfo(h), d.CookieFile)
@@ -450,8 +454,10 @@ func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local b
 		if stop {
 			return "", false, errRunAsUser
 		}
+		listed = map[string]fsx.FileOwner{}
 		found := false // the first node with a cookie outside a home is the default
 		for _, n := range ns {
+			listed[n.cookie] = n.owner
 			if n.inHome {
 				fmt.Fprintf(w.out, "The system service can't read %s: it is in the home of %q.\n", n.cookie, n.user)
 				continue
@@ -466,6 +472,12 @@ func (w *wizard) askNode(ctx context.Context, a *answers) (chain string, local b
 		var pw config.Secret
 		if e, pw, err = w.askEndpoint(ctx, e, d.CookieFile); err != nil {
 			return "", false, err
+		}
+		// A cookie advertised for another user's bitcoind is read as
+		// root, from that user's directory: only the file that was
+		// listed may be read, not whatever the path leads to now.
+		if o, ok := listed[e.CookieFile]; ok {
+			e.CookieOwner = &o
 		}
 		local = isLoopback(e.URL)
 		for {
@@ -1430,6 +1442,15 @@ func (w *wizard) finish(ctx context.Context, a *answers, path string, root bool)
 	if err != nil {
 		return exitFailure, err
 	}
+	// The check polls the node as root, so the cookie of another user's
+	// bitcoind must still be the listed file here too. The written
+	// config can't say that: the identity is not a config field, it
+	// travels on the endpoint.
+	for i := range cfg.Targets {
+		if n := &cfg.Targets[i].Node; a.node.CookieOwner != nil && n.CookieFile == a.node.CookieFile {
+			n.CookieOwner = a.node.CookieOwner
+		}
+	}
 	m, err := app.Build(cfg, w.log)
 	if err != nil {
 		return exitFailure, err
@@ -1674,8 +1695,9 @@ func (w *wizard) userNodeHint(ns []userNode) {
 
 // userNode is a bitcoind run by a user other than root, and its cookie.
 type userNode struct {
-	user, url, cookie string // url: of its RPC, as detected
-	inHome            bool   // the cookie is in the user's home
+	user, url, cookie string        // url: of its RPC, as detected
+	inHome            bool          // the cookie is in the user's home
+	owner             fsx.FileOwner // the cookie's device and owner, as listed
 }
 
 // userNodes finds them in proc (Linux's /proc): the processes named
@@ -1720,16 +1742,25 @@ func userNodes(proc string, lookup func(uid string) (*user.User, error)) []userN
 		}
 		det := config.Env{Root: "/", Home: home, GOOS: runtime.GOOS, Args: args}.Detect()
 		cookie := det.CookieFile
-		n := userNode{u.Username, det.URL, cookie, home != "" && strings.HasPrefix(cookie, filepath.Clean(home)+string(filepath.Separator))}
 		// Any process can be named bitcoind: only a regular file of its
-		// owner is a cookie, not e.g. -rpccookiefile=/etc/shadow.
+		// owner is a cookie, not e.g. -rpccookiefile=/etc/shadow. The
+		// owner is kept, and every later read of the cookie (askNode,
+		// the final check) accepts only a file that still has it: the
+		// cookie's directory is that user's, and the file can be swapped
+		// for a symlink in between.
 		fi, err := os.Stat(cookie)
-		if err != nil || !fi.Mode().IsRegular() || slices.Contains(ns, n) {
+		if err != nil {
 			continue
 		}
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok && strconv.FormatUint(uint64(st.Uid), 10) == uid {
-			ns = append(ns, n)
+		owner, ok := fsx.Owner(fi)
+		if !ok || !fi.Mode().IsRegular() || strconv.FormatUint(uint64(owner.UID), 10) != uid {
+			continue
 		}
+		n := userNode{u.Username, det.URL, cookie, home != "" && strings.HasPrefix(cookie, filepath.Clean(home)+string(filepath.Separator)), owner}
+		if slices.Contains(ns, n) {
+			continue
+		}
+		ns = append(ns, n)
 	}
 	return ns
 }

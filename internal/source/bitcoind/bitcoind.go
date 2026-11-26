@@ -29,8 +29,13 @@ var chainRE = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 type Auth struct {
 	CookieFile string // re-read on every call: bitcoind rewrites it on restart
 	HideCookie bool   // CookieFile may be a pasted secret: keep it out of errors
-	Username   string
-	Password   string
+	// CookieOwner, when set, is the identity of the cookie file at
+	// listing time (fsx.FileOwner): the cookie is read only while it
+	// keeps it. Root setup sets it for the cookie of another user's
+	// bitcoind, whose directory that user controls.
+	CookieOwner *fsx.FileOwner
+	Username    string
+	Password    string
 }
 
 // Client is a bitcoind JSON-RPC client.
@@ -144,7 +149,9 @@ func (c *Client) credentials() (user, pass string, err error) {
 	}
 	// Bounded and regular files only: the cookie's directory belongs to
 	// bitcoind's user, who must not be able to stall or exhaust us.
-	b, err := fsx.ReadSmall(c.auth.CookieFile, maxCookie)
+	// CookieOwner, when set, is checked on the opened file: the path is
+	// in that user's directory, and may lead to another file now.
+	b, err := fsx.ReadSmallOwner(c.auth.CookieFile, maxCookie, c.auth.CookieOwner)
 	if err != nil {
 		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
 			err = pe.Err // the path may be the secret

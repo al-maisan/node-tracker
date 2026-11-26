@@ -28,7 +28,7 @@ const OutboxLimit = 100
 var sources = map[string]func(config.Endpoint, *http.Client) source.Source{
 	config.KindBitcoind: func(e config.Endpoint, hc *http.Client) source.Source {
 		return bitcoind.New(e.Name, e.URL, bitcoind.Auth{
-			CookieFile: e.CookieFile, HideCookie: e.HideCookie, Username: e.Username, Password: string(e.Password),
+			CookieFile: e.CookieFile, HideCookie: e.HideCookie, CookieOwner: e.CookieOwner, Username: e.Username, Password: string(e.Password),
 		}, hc)
 	},
 	config.KindEsplora: func(e config.Endpoint, hc *http.Client) source.Source {

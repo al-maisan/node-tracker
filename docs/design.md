@@ -388,7 +388,13 @@ are set are used as they are.
   owner and arguments of other users' bitcoind processes in `/proc` to
   point at their cookie. It never prints the arguments (they may hold
   `-rpcpassword`), and shows a cookie path only if it is a regular file
-  owned by that process's user: any process can be named bitcoind. Every
+  owned by that process's user: any process can be named bitcoind. That
+  check is repeated on every read of such a cookie while setup runs, and
+  made against the opened file, not the path: the device and owner
+  recorded at listing time must be those of the file that is read, so a
+  cookie swapped for a symlink to someone else's file in between is
+  refused (`fsx.FileOwner`; the inode is not compared, because bitcoind
+  rewrites its cookie atomically, as a new file). Every
   answer goes through the
   config validation, and the whole config through `config.Load` before it
   is written. For a `.onion` node behind Tor's default SOCKS port it
